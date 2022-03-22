@@ -1,0 +1,24 @@
+subscribers:
+
+  camera_reading:
+    rgb_topic: /camera/color/image_raw
+    rgb_queue_size: 1
+    dmap_topic: /camera/depth/dmap
+    dmap_queue_size: 1
+  
+  detections_reading:
+    bounding_box_topic: /detections
+    bounding_box_queue_size: 1
+
+
+publishers:
+
+  object_information:
+    topic: /object_3d_information
+    queue_size: 1
+    latch: false
+
+locating_method:
+
+  enable_depth: true
+  enable_pinhole: false
