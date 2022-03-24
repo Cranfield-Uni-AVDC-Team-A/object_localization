@@ -1,3 +1,4 @@
 *.trt
 *.pycache
 src/__pycache__/
+*.pyc

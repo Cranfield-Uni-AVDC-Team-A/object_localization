@@ -9,7 +9,7 @@ import threading
 
 import rospy
 import rospkg
-pack_path = rospkg.RosPack().get_path("yolo_ros")
+pack_path = rospkg.RosPack().get_path("object_localization")
 sys.path.append(pack_path)
 
 import message_filters
@@ -35,6 +35,7 @@ from uav_stack_msgs.msg import Detector3DArray
 from uav_stack_msgs.msg import Detector3D
 
 from utils.helpers import *
+from utils.helpers import extract_yolo_detections
 
 class ObjectLocatorNode(object):
     def __init__(self):
@@ -44,7 +45,9 @@ class ObjectLocatorNode(object):
         self._last_depth_msg = None
         self._last_cam_info = None
         #self._last_location = None
-        self._msg_lock =  threading.Lock()
+        self._rgb_msg_lock =  threading.Lock()
+        self._depth_msg_lock = threading.Lock()
+        self._cam_info_lock = threading.Lock()
         self.read_params()
         self.init_yolo()
         self.init_pub_sub()
@@ -63,19 +66,19 @@ class ObjectLocatorNode(object):
         rospack = rospkg.RosPack()
         package_path = rospack.get_path("object_localization")
         self._publish_rate = rospy.get_param("/publish_rate", 10)
-        self._rgb_image_topic = rospy.get_param("/rgb_image_topic", "/dummy_rgb_image_topic")
-        self._depth_image_topic = rospy.get_param("/depth_image_topic", "/dummy_depth_image_topic")
-        self._cam_info_topic = rospy.get_param("/camera_info_topic", "/camera_info")
+        self._rgb_image_topic = rospy.get_param("/rgb_image_topic", "/zed2/zed_node/rgb/image_rect_color")
+        self._depth_image_topic = rospy.get_param("/depth_image_topic", "/zed2/zed_node/depth/depth_registered")
+        self._cam_info_topic = rospy.get_param("/camera_info_topic", "/zed2/zed_node/depth/camera_info")
         #self._self_location_topic = rospy.get_param("/self_location", "/local_position/pose")
 
-        self._model = rospy.get_param("/model", "yolov4-416")
+        self._model = rospy.get_param("/model", "yolov4-608")
         self._model_path = rospy.get_param(
             "/model_path", package_path + "/models/")
-        self._category_num = rospy.get_param("/category_number", 2)
-        self._input_shape = rospy.get_param("/input_shape", "416")
+        self._category_num = rospy.get_param("/category_number", 80)
+        self._input_shape = rospy.get_param("/input_shape", "608")
         self._conf_th = rospy.get_param("/confidence_threshold", 0.5)
         self._show_img = rospy.get_param("/show_image", False)
-        self._namesfile = rospy.get_param("/namesfile_path", package_path+ "/configs/obj.names")
+        self._namesfile = rospy.get_param("/namesfile_path", package_path+ "/configs/coco.names")
         self._enable_depth = rospy.get_param("/locating_method/enable_depth", True)
         self._enable_pinhole = rospy.get_param("/locating_method/enable_pinhole", False)
     
@@ -88,7 +91,7 @@ class ObjectLocatorNode(object):
         self._approx_time_sync = message_filters.ApproximateTimeSynchronizer([self._rgb_image_sub, self._depth_image_sub, self._cam_info_sub], 10, 0.1, allow_headerless=True)
         self._approx_time_sync.registerCallback(self.camera_callback)
 
-        self._detection_pub = rospy.Publisher("/detections", Detector2DArray, queue_size=1)
+        self._detection_pub = rospy.Publisher("/detections", Detector3DArray, queue_size=1)
         self._information_pub = rospy.Publisher("/object_information", Detector3DArray, queue_size=1)
 
         self._overlay_pub = rospy.Publisher("/overlay", Image, queue_size=1)
@@ -112,16 +115,23 @@ class ObjectLocatorNode(object):
     
     def camera_callback(self, rgb_msg, depth_msg, cam_info_msg):#, location_msg):
         print("[Camera Callback] Received new images")
-        if self._msg_lock.acquire(False):
-            self._last_rgb_msg = rgb_msg
-            self._last_depth_msg = depth_msg
-            self._last_cam_info = cam_info_msg
+        #if self._rgb_msg_lock.acquire(False):
+        self._last_rgb_msg = rgb_msg
+        #    self._rgb_msg_lock.release()
+
+        #if self._depth_msg_lock.acquire(False):
+        self._last_depth_msg = depth_msg
+        #    self._depth_msg_lock.release()
+
+        #if self._cam_info_lock.acquire(False):
+        self._last_cam_info = cam_info_msg
             #self._last_location = location_msg
-            self._msg_lock.release()
+        #    self._cam_info_lock.release()
     
     def get_object_location(self, objects_detected_dict, depth_msg, cam_info):
         object_locations = dict()
         # Convert ROS Image msg into CV Image (32FC1 encoding)
+        
         try:
             depth_img = self._cv_bridge.imgmsg_to_cv2(depth_msg, desired_encoding="32FC1")
             # Convert the depth image to a Numpy array
@@ -130,7 +140,7 @@ class ObjectLocatorNode(object):
 
         except CvBridgeError as e:
             rospy.logerr("Failed to convert image %s", str(e))
-
+        
         cam_info_cx = cam_info.K[2]
         cam_info_cy = cam_info.K[5]
         cam_info_fx = cam_info.K[0]
@@ -139,12 +149,12 @@ class ObjectLocatorNode(object):
 
         for obj_key, info in objects_detected_dict.items():
             bounding_box = info[1]
-            center_x = bounding_box[0] + (bounding_box[2]-bounding_box[0])/2
-            center_y = bounding_box[1] + (bounding_box[3]-bounding_box[1])/2
+            center_x = int(bounding_box[0] + (bounding_box[2]-bounding_box[0])/2)
+            center_y = int(bounding_box[1] + (bounding_box[3]-bounding_box[1])/2)
 
             # Linear index of the center pixel
-            centerIdx = center_x + depth_msg.width * center_y
-            obj_depth = depth_array[centerIdx]
+            #centerIdx = int(center_x + depth_msg.width * center_y)
+            obj_depth = depth_array[center_y, center_x]
             location_x = obj_depth * ((center_x - cam_info_cx) / cam_info_fx)
             location_y = obj_depth * ((center_y - cam_info_cy) / cam_info_fy)
             location_z = obj_depth
@@ -174,7 +184,7 @@ class ObjectLocatorNode(object):
             top = int(box[1])
             labelSize, baseLine = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
             top = max(top, labelSize[1])
-            overlay_img = cv2.rectangle(cv_img, (left, top - labelSize[1]), (left + labelSize[0], top + baseLine), (255, 255, 255), cv.FILLED)
+            overlay_img = cv2.rectangle(cv_img, (left, top - labelSize[1]), (left + labelSize[0], top + baseLine), (255, 255, 255), cv2.FILLED)
             overlay_img = cv2.putText(cv_img, label, (left, top), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0))
         
         return overlay_img
@@ -182,13 +192,13 @@ class ObjectLocatorNode(object):
     def publisher(self, objects_detected_dict, object_locations):
         detections_msg = Detector3DArray()
         detections_msg.header.stamp = rospy.Time.now()
-        detections_msg.frame_id = "camera"
+        detections_msg.header.frame_id = "camera"
         time_stamp = rospy.Time.now()
 
         for obj_key, info in objects_detected_dict.items():
             detection = Detector3D()
             detection.header.stamp=time_stamp
-            detection.frame_id = "camera"
+            detection.header.frame_id = "camera"
             detection.results.id = info[0]
             detection.results.score = info[2]
             # bbox[0] -> xmin, bbox[1] -> ymin, bbox[2] -> xmax, bbox[3] -> ymax, 
@@ -216,26 +226,49 @@ class ObjectLocatorNode(object):
     
     def run(self):
         rate = rospy.Rate(self._publish_rate)
-
+        print("[Node.Run()] Start running!")
+        status = 0
         while not rospy.is_shutdown():
-            status = 0
+
+            """
             # Mutel Lock Mechanism
-            if self._msg_lock.acquire(False):
+            if self._rgb_msg_lock.acquire(False):
                 rgb_msg = self._last_rgb_msg
+                if rgb_msg is None:
+                    print("rgb is none")
                 self._last_rgb_msg = None
-
+                self._rgb_msg_lock.release()
+            
+            if self._depth_msg_lock.acquire(False):
                 depth_msg = self._last_depth_msg
+                if depth_msg is None:
+                    print("depth is none")
                 self._last_depth_msg = None
+                self._depth_msg_lock.release()
 
+            if self._cam_info_lock.acquire(False):
                 cam_info = self._last_cam_info
+                if cam_info is None:
+                    print("cam info is none")
                 self._last_cam_info = None
+                self._cam_info_lock.release()
+
             else:
                 rate.sleep()
                 continue
-            
+            """
+            rgb_msg = self._last_rgb_msg
+            self._last_rgb_msg = None
+
+            depth_msg = self._last_depth_msg
+            self._last_depth_msg = None
+
+            cam_info = self._last_cam_info
+            self._last_cam_info = None
             if rgb_msg != None and depth_msg != None and cam_info != None:
 
                 if status == 0:
+                    print("~~~~~~~~Status = 0")
                     # Convert ROS Image msg into CV Image (BGR encoding)
                     try:
                         cv_img = self._cv_bridge.imgmsg_to_cv2(rgb_msg, desired_encoding="bgr8")
@@ -243,7 +276,7 @@ class ObjectLocatorNode(object):
                     except CvBridgeError as e:
                         rospy.logerr("Failed to convert image %s", str(e))
 
-                    detections = self._detector.detect(cv_img, self.conf_th)
+                    detections = self._detector.detect(cv_img, self._conf_th)
                     boxes, clss, confs = extract_yolo_detections(cv_img, detections, self._class_names)
                     
                     objects_detected_dict = dict()
@@ -281,7 +314,7 @@ class ObjectLocatorNode(object):
                     timer = cv2.getTickCount()
                     if len(objects_detected_dict) > 0:
                         del_items = []
-                        for obj_key, tracker in multiple_trackers.item():
+                        for obj_key, tracker in multiple_trackers.items():
                             ok, bbox = tracker.update(cv_img)
                             if ok:
                                 objects_detected_dict[obj_key][1] = bbox
@@ -308,7 +341,7 @@ class ObjectLocatorNode(object):
                         img = self.drawPred(cv_img, objects_detected_dict)
                         # Convert CV Image back to ROS Image msg for publishing the overlay image
                         try:
-                            overlay_img = self.cv_bridge.cv2_to_imgmsg(img, encoding="bgr8")
+                            overlay_img = self._cv_bridge.cv2_to_imgmsg(img, encoding="bgr8")
                             rospy.logdebug("CV Image converted for publishing")
                             self._overlay_pub.publish(overlay_img)
                         except CvBridgeError as e:
@@ -332,6 +365,14 @@ class ObjectLocatorNode(object):
                         else:
                             print("[Loop stage] Recover thru Dections fail --> Back to Initialization stage")
                             status = 0
+            else:
+                if rgb_msg is None:
+                    print("rgb msg is NONE")
+                elif depth_msg is None:
+                    print("depth msg is NONE")
+                else:
+                    print("cam info is NONE")
+
 
   
 
