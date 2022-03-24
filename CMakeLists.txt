@@ -10,6 +10,7 @@ project(object_localization)
 find_package(catkin REQUIRED COMPONENTS
   cv_bridge
   image_transport
+  message_filters
   message_generation
   roscpp
   rospy
@@ -17,7 +18,7 @@ find_package(catkin REQUIRED COMPONENTS
   std_msgs
   uav_stack_msgs
   vision_msgs
-)
+)  
 
 ## System dependencies are found with CMake's conventions
 # find_package(Boost REQUIRED COMPONENTS system)
@@ -109,10 +110,21 @@ find_package(catkin REQUIRED COMPONENTS
 ## CATKIN_DEPENDS: catkin_packages dependent projects also need
 ## DEPENDS: system dependencies of this project that dependent projects also need
 catkin_package(
-#  INCLUDE_DIRS include
-#  LIBRARIES object_localization
-#  CATKIN_DEPENDS cv_bridge image_transport message_filter message_generation roscpp rospy sensor_msgs std_msgs uav_stack_msgs vision_msgs
-#  DEPENDS system_lib
+  INCLUDE_DIRS 
+    include
+  LIBRARIES 
+    object_localization
+  CATKIN_DEPENDS 
+  cv_bridge 
+  image_transport 
+  message_filters
+  roscpp 
+  rospy 
+  sensor_msgs 
+  std_msgs 
+  uav_stack_msgs 
+  vision_msgs
+  #DEPENDS system_lib
 )
 
 ###########
@@ -165,10 +177,10 @@ include_directories(
 
 ## Mark executable scripts (Python etc.) for installation
 ## in contrast to setup.py, you can choose the destination
-# catkin_install_python(PROGRAMS
-#   scripts/my_python_script
-#   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
-# )
+catkin_install_python(PROGRAMS
+   src/test_node.py
+   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+ )
 
 ## Mark executables for installation
 ## See http://docs.ros.org/melodic/api/catkin/html/howto/format1/building_executables.html
