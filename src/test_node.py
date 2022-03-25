@@ -53,6 +53,7 @@ class ObjectLocatorNode(object):
         self.init_pub_sub()
         self._cuda_ctx = cuda.Device(0).make_context()
         self._detector = Yolo_TRT((self._model_path + self._model), (self._h, self._w), self._category_num)
+        self._multiTracker = None
         print("[YOLO-Node] Ros Node Initialization done")
     
     def __del__(self):
@@ -65,8 +66,9 @@ class ObjectLocatorNode(object):
         """ Initializes ros parameters """
         rospack = rospkg.RosPack()
         package_path = rospack.get_path("object_localization")
-        self._publish_rate = rospy.get_param("/publish_rate", 10)
+        self._publish_rate = rospy.get_param("/publish_rate", 15)
         self._rgb_image_topic = rospy.get_param("/rgb_image_topic", "/zed2/zed_node/rgb/image_rect_color")
+        #self._rgb_image_topic = rospy.get_param("/rgb_image_topic", "/camera/image_raw")
         self._depth_image_topic = rospy.get_param("/depth_image_topic", "/zed2/zed_node/depth/depth_registered")
         self._cam_info_topic = rospy.get_param("/camera_info_topic", "/zed2/zed_node/depth/camera_info")
         #self._self_location_topic = rospy.get_param("/self_location", "/local_position/pose")
@@ -76,25 +78,26 @@ class ObjectLocatorNode(object):
             "/model_path", package_path + "/models/")
         self._category_num = rospy.get_param("/category_number", 80)
         self._input_shape = rospy.get_param("/input_shape", "608")
-        self._conf_th = rospy.get_param("/confidence_threshold", 0.5)
+        self._conf_th = rospy.get_param("/confidence_threshold", 0.7)
         self._show_img = rospy.get_param("/show_image", False)
         self._namesfile = rospy.get_param("/namesfile_path", package_path+ "/configs/coco.names")
         self._enable_depth = rospy.get_param("/locating_method/enable_depth", True)
         self._enable_pinhole = rospy.get_param("/locating_method/enable_pinhole", False)
     
     def init_pub_sub(self):
-        self._rgb_image_sub = message_filters.Subscriber(self._rgb_image_topic, Image)
-        self._depth_image_sub = message_filters.Subscriber(self._depth_image_topic, Image)
-        self._cam_info_sub = message_filters.Subscriber(self._cam_info_topic, CameraInfo)
+        rospy.Subscriber(self._rgb_image_topic, Image, self._rgb_camera_callback, queue_size=10)
+        rospy.Subscriber(self._depth_image_topic, Image, self._depth_camera_callback, queue_size=10)
+        #self._rgb_image_sub = message_filters.Subscriber(self._rgb_image_topic, Image)
+        #self._depth_image_sub = message_filters.Subscriber(self._depth_image_topic, Image)
+        #self._cam_info_sub = message_filters.Subscriber(self._cam_info_topic, CameraInfo)
         #self._self_location_sub =  message_filters.Subscriber(self._self_location_topic, PoseStamped)
         #self._approx_time_sync = message_filters.ApproximateTimeSynchronizer([self._rgb_image_sub, self._depth_image_sub, self._cam_info_sub, self._self_location_sub], 10)
-        self._approx_time_sync = message_filters.ApproximateTimeSynchronizer([self._rgb_image_sub, self._depth_image_sub, self._cam_info_sub], 10, 0.1, allow_headerless=True)
-        self._approx_time_sync.registerCallback(self.camera_callback)
+        #self._approx_time_sync = message_filters.ApproximateTimeSynchronizer([self._rgb_image_sub, self._depth_image_sub, self._cam_info_sub], 10, 0.1, allow_headerless=True)
+        #self._approx_time_sync = message_filters.ApproximateTimeSynchronizer([self._rgb_image_sub, self._depth_image_sub], 10, 0.1, allow_headerless=True)
+        #self._approx_time_sync.registerCallback(self.camera_callback)
 
         self._detection_pub = rospy.Publisher("/detections", Detector3DArray, queue_size=1)
-        self._information_pub = rospy.Publisher("/object_information", Detector3DArray, queue_size=1)
-
-        self._overlay_pub = rospy.Publisher("/overlay", Image, queue_size=1)
+        self._overlay_pub = rospy.Publisher("/overlay", Image, queue_size=10)
     
     def init_yolo(self):
         """ Initialises yolo parameters required for the TensorRT engine """
@@ -112,26 +115,32 @@ class ObjectLocatorNode(object):
         self._class_names = load_class_names(self._namesfile)
 
         self._vis = BBoxVisualization(cls_dict)
-    
-    def camera_callback(self, rgb_msg, depth_msg, cam_info_msg):#, location_msg):
-        print("[Camera Callback] Received new images")
-        #if self._rgb_msg_lock.acquire(False):
-        self._last_rgb_msg = rgb_msg
-        #    self._rgb_msg_lock.release()
+    """
+    def camera_callback(self, rgb_msg, depth_msg): #, cam_info_msg):#, location_msg):
+        #print("[Camera Callback] Received new images")
+        if self._rgb_msg_lock.acquire(False):
+            self._last_rgb_msg = rgb_msg
+            self._rgb_msg_lock.release()
 
-        #if self._depth_msg_lock.acquire(False):
-        self._last_depth_msg = depth_msg
-        #    self._depth_msg_lock.release()
+        if self._depth_msg_lock.acquire(False):
+            self._last_depth_msg = depth_msg
+            self._depth_msg_lock.release()
 
-        #if self._cam_info_lock.acquire(False):
+        if self._cam_info_lock.acquire(False):
         self._last_cam_info = cam_info_msg
             #self._last_location = location_msg
-        #    self._cam_info_lock.release()
-    
-    def get_object_location(self, objects_detected_dict, depth_msg, cam_info):
+            self._cam_info_lock.release()
+    """
+    def _rgb_camera_callback(self, rgb_msg):
+        self._last_rgb_msg = rgb_msg
+
+    def _depth_camera_callback(self, depth_msg):
+        self._last_depth_msg = depth_msg
+
+    #def get_object_location(self, objects_detected_dict, depth_msg, cam_info):
+    def get_object_location(self, objects_detected_dict, depth_msg):
         object_locations = dict()
-        # Convert ROS Image msg into CV Image (32FC1 encoding)
-        
+        # Convert ROS Image msg into CV Image (32FC1 encoding)        
         try:
             depth_img = self._cv_bridge.imgmsg_to_cv2(depth_msg, desired_encoding="32FC1")
             # Convert the depth image to a Numpy array
@@ -140,12 +149,11 @@ class ObjectLocatorNode(object):
 
         except CvBridgeError as e:
             rospy.logerr("Failed to convert image %s", str(e))
-        
-        cam_info_cx = cam_info.K[2]
-        cam_info_cy = cam_info.K[5]
-        cam_info_fx = cam_info.K[0]
-        cam_info_fy = cam_info.K[4]
-        print("[Camera Info Debug] cx = {} | cy = {} | fx = {} | fy = {}".format(cam_info_cx, cam_info_cy, cam_info_fx, cam_info_fy))
+
+        cam_info_cx = 619.2830200195312 
+        cam_info_cy = 58.9440612792969
+        cam_info_fx = 529.1268920898438
+        cam_info_fy = 529.1268920898438
 
         for obj_key, info in objects_detected_dict.items():
             bounding_box = info[1]
@@ -175,11 +183,16 @@ class ObjectLocatorNode(object):
     def drawPred(self,cv_img, objects_detected_dict):
         for obj_key, info in objects_detected_dict.items():
             box = info[1]
+            print("[DrawPred] #{} Bounding box :: {}".format(obj_key, box))
             confidence = info[2]
             label = '%s: %.2f' % (obj_key, confidence)
+            width = cv_img.shape[1]
+            height = cv_img.shape[0]
+            bbox_thick = int(0.6 * (height + width) / 600)
             p1 = (int(box[0]), int(box[1]))
-            p2 = (int(box[0] + box[2]), int(box[1] + box[3]))
-            overlay_img = cv2.rectangle(cv_img, p1, p2, (0, 255, 0))
+            #p2 = (int(box[0] + box[2]), int(box[1] + box[3]))
+            p2 = (int(box[2]), int(box[3]))
+            overlay_img = cv2.rectangle(cv_img, p1, p2, (0, 255, 0), bbox_thick)
             left = int(box[0])
             top = int(box[1])
             labelSize, baseLine = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
@@ -228,152 +241,132 @@ class ObjectLocatorNode(object):
         rate = rospy.Rate(self._publish_rate)
         print("[Node.Run()] Start running!")
         status = 0
+        frames_skipped = 0
         while not rospy.is_shutdown():
-
-            """
-            # Mutel Lock Mechanism
-            if self._rgb_msg_lock.acquire(False):
-                rgb_msg = self._last_rgb_msg
-                if rgb_msg is None:
-                    print("rgb is none")
-                self._last_rgb_msg = None
-                self._rgb_msg_lock.release()
-            
-            if self._depth_msg_lock.acquire(False):
-                depth_msg = self._last_depth_msg
-                if depth_msg is None:
-                    print("depth is none")
-                self._last_depth_msg = None
-                self._depth_msg_lock.release()
-
-            if self._cam_info_lock.acquire(False):
-                cam_info = self._last_cam_info
-                if cam_info is None:
-                    print("cam info is none")
-                self._last_cam_info = None
-                self._cam_info_lock.release()
-
-            else:
-                rate.sleep()
-                continue
-            """
             rgb_msg = self._last_rgb_msg
-            self._last_rgb_msg = None
-
+            #self._last_rgb_msg = None
             depth_msg = self._last_depth_msg
-            self._last_depth_msg = None
-
-            cam_info = self._last_cam_info
-            self._last_cam_info = None
-            if rgb_msg != None and depth_msg != None and cam_info != None:
-
-                if status == 0:
-                    print("~~~~~~~~Status = 0")
-                    # Convert ROS Image msg into CV Image (BGR encoding)
-                    try:
-                        cv_img = self._cv_bridge.imgmsg_to_cv2(rgb_msg, desired_encoding="bgr8")
-                        rospy.logdebug("ROS Image converted for processing")
-                    except CvBridgeError as e:
-                        rospy.logerr("Failed to convert image %s", str(e))
-
-                    detections = self._detector.detect(cv_img, self._conf_th)
-                    boxes, clss, confs = extract_yolo_detections(cv_img, detections, self._class_names)
+            #self._last_depth_msg = None
+            # Convert ROS Image msg into CV Image (BGR encoding)
+            cv_img = self._cv_bridge.imgmsg_to_cv2(rgb_msg, desired_encoding="bgr8")
+            print("image size = {}".format(cv_img.shape))
+            """
+            try:
+                cv_img = self._cv_bridge.imgmsg_to_cv2(rgb_msg, desired_encoding="bgr8")
+                rospy.logdebug("ROS Image converted for processing")
+            except CvBridgeError as e:
+                rospy.logerr("Failed to convert image %s", str(e))
+            """
+            if status == 0:
+                print("~~~~~~~~Status = 0")
+                # Call Detection to initialize the trackers
+                detections = self._detector.detect(cv_img, self._conf_th)
+                boxes, clss, confs = extract_yolo_detections(cv_img, detections, self._class_names)    
+                objects_detected_dict = dict()
+                objects_detected_dict = self.postprocess(clss, boxes, confs)  # [0_1:{1, [x, y, h, w], confs}, 1_0:{0, x, y, h, w, confs}
+                objects_list = list(objects_detected_dict.keys())  # [0_1, 1_0, ...]
+                print('Tracking the following objects', objects_list)
+                #Multiple tracker for Monitor Drone
+                self._multiTracker = cv2.legacy.MultiTracker_create()
+                if len(objects_list) > 0: # If detect success
+                    for obj_key, info in objects_detected_dict.items():
+                        tracker = cv2.legacy.TrackerMedianFlow_create()
+                        self._multiTracker.add(tracker, cv_img, info[1])
+                    status = 1 # Detect and Track Initialization done
+                    print("[Initialization stage] Multi-trackers are initialised")
+                else:
+                    print("[Initialization stage] Dections fail --> Stay at Initialization stage")
+                    status = 0
+                """
+                #Multiple tracker for Monitor Drone
+                multiple_trackers = dict()
+                if len(objects_list) > 0: # If detect success
+                    multiple_trackers = {key: cv2.TrackerKCF_create() for key in objects_list}
+                    for item in objects_list:
+                        multiple_trackers[item].init(cv_img, objects_detected_dict[item][1])
+                    status = 1 # Detect and Track Initialization done
+                    print("[Initialization stage] Multi-trackers are initialised")
+                else:
+                    print("[Initialization stage] Dections fail --> Stay at Initialization stage")
+                    status = 0
+                """
+            elif status == 1:  
+                print("----------- [Loop Stage] Tracking -----------")
+                
+                if len(objects_detected_dict) > 0:
+                    i = 0
+                    tic = time.time() 
+                    oks, new_boxes = self._multiTracker.update(cv_img)
+                    toc = time.time()
+                    fps = 1.0 / (toc - tic)
+                    print("FPS = {}".format(fps))
                     
+                    for obj_key in objects_detected_dict:
+                        objects_detected_dict[obj_key][1] = new_boxes[i]
+                        print("#{} Bounding Box :: {}".format(obj_key, new_boxes[i]))
+                        i = i+1
+                    
+                """
+                if len(objects_detected_dict) > 0:
+                    del_items = []
+                    for obj_key, tracker in multiple_trackers.items():
+                        ok, bbox = tracker.update(cv_img)
+                        if ok:
+                            objects_detected_dict[obj_key][1] = bbox
+                        else:
+                            print("Tracker of #{} Lose Track".format(obj_key))
+                            del_items.append(obj_key)
+                        
+                    for lost_track_obj_key in del_items:
+                        multiple_trackers.pop(lost_track_obj_key)
+                        objects_detected_dict.pop(lost_track_obj_key)
+                """
+                
+
+                if len(objects_detected_dict) > 0: # meaning that not all trackers are failed
+                    # the objs in the dict are the remaining tracker target
+                    print("Number of objects tracking = {}".format(len(objects_detected_dict)))
+                    #objects_list = list(objects_detected_dict.keys())
+                    object_locations = dict() # {clsID_num: [x, y, z]}
+                    object_locations = self.get_object_location(objects_detected_dict, depth_msg)
+                    #Publish the Object Information
+                    self.publisher(objects_detected_dict, object_locations)
+                    # Overlay Images
+                    img = self.drawPred(cv_img, objects_detected_dict)
+                    # Convert CV Image back to ROS Image msg for publishing the overlay image
+                    try:
+                        overlay_img = self._cv_bridge.cv2_to_imgmsg(img, encoding="bgr8")
+                        rospy.logdebug("CV Image converted for publishing")
+                        self._overlay_pub.publish(overlay_img)
+                    except CvBridgeError as e:
+                        rospy.loginfo("Failed to convert image %s", str(e))
+                    
+                else: # meaning that tracker all fail --> Call Detect
+                    print("[Loop Stage] Detection Recover")
+                    detections = self._detector.detect(cv_img, self.conf_th)
+                    boxes, clss, confs = extract_yolo_detections(cv_img, detections, self._class_names)
+                
                     objects_detected_dict = dict()
                     objects_detected_dict = self.postprocess(clss, boxes, confs)  # [0_1:{1, [x, y, h, w], confs}, 1_0:{0, x, y, h, w, confs}
                     objects_list = list(objects_detected_dict.keys())  # [0_1, 1_0, ...]
                     print('Tracking the following objects', objects_list)
-                    """
-                    depths = dict() # {clsID_num: depth}
-                    depths = self.get_object_depth(objects_list, objects_detected_dict)
-                    object_locations = dict() # {clsID_num: location}
-                    object_locations = self.get_object_location(objects_list, objects_detected_dict, depths)
-
-                    desired_object = dict() #{clsID_num: {clsID,}}
-                    desired_object = self.initial_filter(objects_list, objects_detected_dict, object_locations, self._last_location)
-                    """
-                    
-                    
-
-                    #Multiple tracker for Monitor Drone
+                        
+                    # Recover the Multi-trackers
                     multiple_trackers = dict()
                     if len(objects_list) > 0: # If detect success
                         multiple_trackers = {key: cv2.TrackerKCF_create() for key in objects_list}
                         for item in objects_list:
                             multiple_trackers[item].init(cv_img, objects_detected_dict[item][1])
-                    
-                        status = 1 # Detect and Track Initialization done
-                        print("[Initialization stage] Multi-trackers are initialised")
                     else:
-                        print("[Initialization stage] Dections fail --> Stay at Initialization stage")
-                        status = 0
-                
-                elif status == 1:
-                    
-                    print("[Loop Stage] Tracking")
-                    timer = cv2.getTickCount()
-                    if len(objects_detected_dict) > 0:
-                        del_items = []
-                        for obj_key, tracker in multiple_trackers.items():
-                            ok, bbox = tracker.update(cv_img)
-                            if ok:
-                                objects_detected_dict[obj_key][1] = bbox
-                            else:
-                                print("Tracker of #{} Lose Track".format(obj_key))
-                                del_items.append(obj_key)
-                        
-                        for lost_track_obj_key in del_items:
-                            multiple_trackers.pop(lost_track_obj_key)
-                            objects_detected_dict.pop(lost_track_obj_key)
-                        
-                    fps = cv2.getTickFrequency() / (cv2.getTickCount() - timer)
+                        print("[Loop stage] Recover thru Dections fail --> Back to Initialization stage")
+                        status = 0      
 
-                    if len(objects_detected_dict) > 0: # meaning that not all trackers are failed
-                        # the objs in the dict are the remaining tracker target
-                        objects_list = list(objects_detected_dict.keys())
-                        object_locations = dict() # {clsID_num: [x, y, z]}
-                        object_locations = self.get_object_location(objects_detected_dict, depth_msg, cam_info)
-
-                        # Publish the Object Information
-                        self.publisher(objects_detected_dict, object_locations)
-
-                        # Overlay Images
-                        img = self.drawPred(cv_img, objects_detected_dict)
-                        # Convert CV Image back to ROS Image msg for publishing the overlay image
-                        try:
-                            overlay_img = self._cv_bridge.cv2_to_imgmsg(img, encoding="bgr8")
-                            rospy.logdebug("CV Image converted for publishing")
-                            self._overlay_pub.publish(overlay_img)
-                        except CvBridgeError as e:
-                            rospy.loginfo("Failed to convert image %s", str(e))
-                    
-                    else: # meaning that tracker all fail --> Call Detect
-                        detections = self._detector.detect(cv_img, self.conf_th)
-                        boxes, clss, confs = extract_yolo_detections(cv_img, detections, self._class_names)
-                    
-                        objects_detected_dict = dict()
-                        objects_detected_dict = self.postprocess(clss, boxes, confs)  # [0_1:{1, [x, y, h, w], confs}, 1_0:{0, x, y, h, w, confs}
-                        objects_list = list(objects_detected_dict.keys())  # [0_1, 1_0, ...]
-                        print('Tracking the following objects', objects_list)
-                        
-                        # Recover the Multi-trackers
-                        multiple_trackers = dict()
-                        if len(objects_list) > 0: # If detect success
-                            multiple_trackers = {key: cv2.TrackerKCF_create() for key in objects_list}
-                            for item in objects_list:
-                                multiple_trackers[item].init(cv_img, objects_detected_dict[item][1])
-                        else:
-                            print("[Loop stage] Recover thru Dections fail --> Back to Initialization stage")
-                            status = 0
-            else:
-                if rgb_msg is None:
-                    print("rgb msg is NONE")
-                elif depth_msg is None:
-                    print("depth msg is NONE")
-                else:
-                    print("cam info is NONE")
-
-
+                frames_skipped = frames_skipped + 1
+                if frames_skipped > 9:
+                    status = 0 
+                    print("10 frames passed, detect again")
+                    frames_skipped = 0         
+            
   
 
 def main():
