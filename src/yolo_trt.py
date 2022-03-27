@@ -7,7 +7,7 @@ import sys
 
 import argparse
 import rospkg
-pack_path = rospkg.RosPack().get_path("yolo_ros")
+pack_path = rospkg.RosPack().get_path("object_localization")
 sys.path.append(pack_path)
 
 import numpy as np
