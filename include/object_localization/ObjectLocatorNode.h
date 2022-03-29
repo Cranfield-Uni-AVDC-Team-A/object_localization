@@ -69,7 +69,8 @@ private:
     std::string depthTopic_;
     std::string objectDetectionsTopic_;
     std::string overlayImageTopic_;
-
+    
+    bool publish_overlay_;
 
 
     

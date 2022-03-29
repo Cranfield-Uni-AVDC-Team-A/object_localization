@@ -84,7 +84,7 @@ std::vector<Detections2D> Detector::detect(cv_bridge::CvImagePtr rgb_image_ptr)
 {
     // Prepare the Input Data for the Engine
     // letterbox BGR to RGB
-    cv::Mat rgb_mat = rgb_image_ptr->image.clone();
+    cv::Mat rgb_mat = rgb_image_ptr->image;
     cv::Mat pr_img = preprocess_img(rgb_mat, INPUT_W, INPUT_H);
     int i = 0;
     int batch = 0;
@@ -104,8 +104,8 @@ std::vector<Detections2D> Detector::detect(cv_bridge::CvImagePtr rgb_image_ptr)
     std::vector<std::vector < Yolo::Detection >> batch_res(BATCH_SIZE);
     auto& res = batch_res[batch];
     nms(res, &prob[batch * OUTPUT_SIZE], CONF_THRESH, NMS_THRESH);
+    
     std::vector<Detections2D> detections_array;
-
     for (auto &it : res) {
         Detections2D detection;
         cv::Rect r = get_rect(rgb_mat, it.bbox);

@@ -22,11 +22,12 @@ ObjectLocatorNode::ObjectLocatorNode(const ros::NodeHandle &nh, const ros::NodeH
     nh_private_.param("yolo_detection_threshold", yoloThresh, 0.998);
     nh_private_.param("yolo_nms_threshold", yoloNms, 0.25);
 
-    // Publisher and Subscriber Toppics
-    nh_private_.param("rgb_image_topic", rgbTopic_, std::string("/camera1/image_raw"));
-    nh_private_.param("depth_image_topic", depthTopic_, std::string("/camera2/depth_image_raw"));
+    // Publisher and Subscriber Topics
+    nh_private_.param("rgb_image_topic", rgbTopic_, std::string("/zed2/zed_node/left/image_rect_color"));
+    nh_private_.param("depth_image_topic", depthTopic_, std::string("/zed2/zed_node/depth/depth_registered"));
     nh_private_.param("object_detections_topic", objectDetectionsTopic_, std::string("/situational_awareness/object_detections"));
     nh_private_.param("overlay_image_topic", overlayImageTopic_, std::string("/situational_awareness/overlay_image"));
+    nh_private_.param("publish_overlay", publish_overlay_, false);
 
     /* Setup the Synchronized subscriber */
     rgbSubscriber_.subscribe(imageTransport_, rgbTopic_, 3);
@@ -36,7 +37,10 @@ ObjectLocatorNode::ObjectLocatorNode(const ros::NodeHandle &nh, const ros::NodeH
 
     /* Setup the Publisher */
     objectDetectionsPublisher_ = nh_.advertise<uav_stack_msgs::Detector3DArray>(objectDetectionsTopic_,2, false);
-    overlayImagePublisher_ = imageTransport_.advertise(overlayImageTopic_, 2);
+    
+    if(publish_overlay_ == true) {
+        overlayImagePublisher_ = imageTransport_.advertise(overlayImageTopic_, 2);
+    }
 
     // Initialized the YOLO Detector
     detector_.reset(new Detector(ros::package::getPath("object_localization") + "/models/" + engine_name, yoloW, yoloH, yoloClasses, yoloThresh, yoloNms));
@@ -49,7 +53,7 @@ void ObjectLocatorNode::cameraCallback(const sensor_msgs::ImageConstPtr& rgb_msg
 {
     cv_bridge::CvImagePtr rgb_image_ptr;
     cv_bridge::CvImagePtr depth_image_ptr;
-
+    
     // Convert ROS Image MSG to CV::MAT
     try {
         rgb_image_ptr = cv_bridge::toCvCopy(rgb_msg, sensor_msgs::image_encodings::BGR8);
@@ -61,6 +65,7 @@ void ObjectLocatorNode::cameraCallback(const sensor_msgs::ImageConstPtr& rgb_msg
 
     // Detect
     std::vector<Detections2D> detections2D_array = detector_->detect(rgb_image_ptr);
+
     // Locate
     std::vector<ObjectLocatorNode::Positions3D> positions3D_array
         = retrievePosition(detections2D_array, depth_image_ptr);
@@ -71,9 +76,12 @@ void ObjectLocatorNode::cameraCallback(const sensor_msgs::ImageConstPtr& rgb_msg
                                                                         rgb_msg->header);
     objectDetectionsPublisher_.publish(detection_message); // Publish it ~!
 
-    // Draw the Overlay Image
-    drawDetections(rgb_image_ptr, detections2D_array);
-    overlayImagePublisher_.publish(rgb_image_ptr->toImageMsg());
+    
+    if(publish_overlay_ == true){   
+        // Draw the Overlay Image
+        drawDetections(rgb_image_ptr, detections2D_array);
+        overlayImagePublisher_.publish(rgb_image_ptr->toImageMsg());
+    }
 }
 
 uav_stack_msgs::Detector3DArray ObjectLocatorNode::composeMessages(std::vector<Detections2D>& detections2D_array, 
