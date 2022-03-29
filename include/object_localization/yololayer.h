@@ -1,3 +1,5 @@
+#pragma once
+
 #ifndef _YOLO_LAYER_H
 #define _YOLO_LAYER_H
 

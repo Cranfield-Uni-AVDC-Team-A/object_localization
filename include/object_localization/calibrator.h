@@ -1,3 +1,4 @@
+#pragma once
 #ifndef ENTROPY_CALIBRATOR_H
 #define ENTROPY_CALIBRATOR_H
 

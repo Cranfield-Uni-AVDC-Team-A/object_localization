@@ -1,3 +1,4 @@
+#pragma once
 #ifndef DRAWING_UTILS_HPP
 #define DRAWING_UTILS_HPP
 

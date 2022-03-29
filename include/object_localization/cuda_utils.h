@@ -1,3 +1,4 @@
+#pragma once
 #ifndef TRTX_CUDA_UTILS_H_
 #define TRTX_CUDA_UTILS_H_
 

@@ -2,15 +2,14 @@
 #include <iostream>
 #include <chrono>
 #include <cmath>
-#include "cuda_utils.h"
-#include "logging.h"
-#include "common.hpp"
-#include "utils.h"
-#include "calibrator.h"
-#include "GLViewer.hpp"
+#include "object_localization/cuda_utils.h"
+#include "object_localization/logging.h"
+#include "object_localization/common.hpp"
+#include "object_localization/utils.h"
+#include "object_localization/calibrator.h"
 
-#include <sl/Camera.hpp>
 #include <opencv2/opencv.hpp>
+#include <cv_bridge/cv_bridge.h>
 
 #define USE_FP16  // set USE_INT8 or USE_FP16 or USE_FP32
 #define DEVICE 0  // GPU id
@@ -23,8 +22,8 @@ static const int INPUT_H = Yolo::INPUT_H;
 static const int INPUT_W = Yolo::INPUT_W;
 static const int CLASS_NUM = Yolo::CLASS_NUM;
 static const int OUTPUT_SIZE = Yolo::MAX_OUTPUT_BBOX_COUNT * sizeof (Yolo::Detection) / sizeof (float) + 1; // we assume the yololayer outputs no more than MAX_OUTPUT_BBOX_COUNT boxes that conf >= 0.1
-const char* INPUT_BLOB_NAME = "data";
-const char* OUTPUT_BLOB_NAME = "prob";
+inline const char* INPUT_BLOB_NAME = "data";
+inline const char* OUTPUT_BLOB_NAME = "prob";
 static Logger gLogger;
 
 static int get_width(int x, float gw, int divisor = 8) {
@@ -41,7 +40,7 @@ static int get_depth(int x, float gd) {
 }
 
 struct Detections2D{
-    cv::rect rectangle_box // (top_left_x, top_left_y, width_of_bbox, height_of_bbox)
+    cv::Rect rectangle_box; // (top_left_x, top_left_y, width_of_bbox, height_of_bbox)
     int classID;
     float prob;
 };
@@ -52,8 +51,9 @@ class Detector{
 public:
     Detector(std::string engine_name, int input_w, int input_h, int num_classes, float yolo_thresh, float nms_thresh);
     ~Detector();
-    void doInference(IExecutionContext& context, cudaStream_t& stream, void **buffers, float* input, float* output, int batchSize)
-    std::vector<Detections2D>> detect(cv::Mat& rgb_mat);
+    void doInference(IExecutionContext& context, cudaStream_t& stream, void **buffers, float* input, float* output, int batchSize);
+    //std::vector<Detections2D> detect(cv::Mat& rgb_mat);
+    std::vector<Detections2D> detect(cv_bridge::CvImagePtr rgb_image_ptr);
 
 private:
     IRuntime* runtime_;
@@ -61,9 +61,12 @@ private:
     IExecutionContext* context_;
     cudaStream_t stream_;
     void* buffers[2];
+    
+    int inputIndex_;
+    int outputIndex_;
 
-    static float data[BATCH_SIZE * 3 * INPUT_H * INPUT_W];  // input
-    static float prob[BATCH_SIZE * OUTPUT_SIZE];;  // output
+    float data[BATCH_SIZE * 3 * INPUT_H * INPUT_W];  // input
+    float prob[BATCH_SIZE * OUTPUT_SIZE];;  // output
     int inputW_;
     int inputH_;
     int numClasses_;

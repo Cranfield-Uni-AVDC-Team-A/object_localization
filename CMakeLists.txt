@@ -40,10 +40,8 @@ find_package(catkin REQUIRED COMPONENTS
 )  
 
 catkin_package(
-  INCLUDE_DIRS 
-    include
-  LIBRARIES 
-    object_localization
+  INCLUDE_DIRS include
+  LIBRARIES object_localization
   CATKIN_DEPENDS 
   cv_bridge 
   image_transport 
@@ -56,10 +54,7 @@ catkin_package(
   vision_msgs
   #DEPENDS system_lib
 )
-############################################################
-##        Include path for our own headers/library        ##
-############################################################
-include_directories(${catkin_INCLUDE_DIRS})
+
 
 ############################################################
 ##        Include path for Required 3rd party library     ##
@@ -70,6 +65,11 @@ include_directories(${ZED_INCLUDE_DIRS})
 include_directories(${GLEW_INCLUDE_DIRS})
 include_directories(${GLUT_INCLUDE_DIR})
 include_directories(${CUDA_INCLUDE_DIRS})
+
+############################################################
+##        Include path for our own headers/library        ##
+############################################################
+include_directories(include ${catkin_INCLUDE_DIRS})
 
 
 link_directories(${ZED_LIBRARY_DIR})
@@ -92,10 +92,10 @@ link_directories(/usr/lib/x86_64-linux-gnu/)
 
 FILE(GLOB_RECURSE SRC_FILES src/*.c*)
 FILE(GLOB_RECURSE HDR_FILES include/*.h*)
-FILE(GLOB_RECURSE PACKAGE_HDR_FILES include/object_localization/*.h*)
+#FILE(GLOB_RECURSE PACKAGE_HDR_FILES include/object_localization/*.h*)
 
 set(CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS} -std=c++11)
-cuda_add_executable(${PROJECT_NAME} ${HDR_FILES} ${PACKAGE_HDR_FILES} ${SRC_FILES})
+cuda_add_executable(${PROJECT_NAME} ${HDR_FILES} ${SRC_FILES})
 add_definitions(-std=c++14 -g -O3 -D_MWAITXINTRIN_H_INCLUDED -Wno-deprecated-declarations)
 
 
@@ -117,22 +117,24 @@ SET(TRT_LIBS nvinfer)
 ########################################################
 
 target_link_libraries(${PROJECT_NAME}
-                        ${TRT_LIBS}
-                        ${SPECIAL_OS_LIBS}
-                        ${ZED_LIBS}
-                        ${OPENGL_LIBRARIES}
-                        ${GLUT_LIBRARY}
-                        ${GLEW_LIBRARIES}
-                        ${OpenCV_LIBRARIES}
-                        ${CUDA_CUDA_LIBRARY} ${CUDA_CUDART_LIBRARY})
+		      ${catkin_LIBRARIES}
+			${TRT_LIBS}
+			${SPECIAL_OS_LIBS}
+			${ZED_LIBS}
+			${OPENGL_LIBRARIES}
+			${GLUT_LIBRARY}
+			${GLEW_LIBRARIES}
+			${OpenCV_LIBRARIES}
+			${CUDA_CUDA_LIBRARY} ${CUDA_CUDART_LIBRARY})
 
+add_dependencies(${PROJECT_NAME} uav_stack_msgs_generate_messages_cpp)
 #############
 ## Install ##
 #############
 
 catkin_install_python(PROGRAMS
-   sripts/test_node.py
-   sripts/test_sub.py
+   scripts/test_node.py
+   scripts/test_sub.py
    DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
  )
 

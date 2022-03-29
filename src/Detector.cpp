@@ -1,6 +1,6 @@
 #include "object_localization/Detector.h"
 
-Detector::Dectector(std::string engine_name, int input_w, int input_h, int num_classes, float yolo_thresh, float nms_thresh)
+Detector::Detector(std::string engine_name, int input_w, int input_h, int num_classes, float yolo_thresh, float nms_thresh)
     : inputW_(input_w),
       inputH_(input_h),
       numClasses_(num_classes),
@@ -16,7 +16,7 @@ Detector::Dectector(std::string engine_name, int input_w, int input_h, int num_c
     std::ifstream file(engine_name, std::ios::binary);
     if (!file.good()) {
         std::cerr << "read " << engine_name << " error!" << std::endl;
-        return -1;
+        //return -1;
     }
     char *trtModelStream = nullptr;
     size_t size = 0;
@@ -39,13 +39,13 @@ Detector::Dectector(std::string engine_name, int input_w, int input_h, int num_c
     // Buffers
     // In order to bind the buffers, we need to know the names of the input and output tensors.
     // Note that indices are guaranteed to be less than IEngine::getNbBindings()
-    const int inputIndex = engine_->getBindingIndex(INPUT_BLOB_NAME);
-    const int outputIndex = engine_->getBindingIndex(OUTPUT_BLOB_NAME);
-    assert(inputIndex == 0);
-    assert(outputIndex == 1);
+    inputIndex_ = engine_->getBindingIndex(INPUT_BLOB_NAME);
+    outputIndex_ = engine_->getBindingIndex(OUTPUT_BLOB_NAME);
+    assert(inputIndex_ == 0);
+    assert(outputIndex_ == 1);
     // Create GPU buffers on device
-    CUDA_CHECK(cudaMalloc(&buffers[inputIndex], BATCH_SIZE * 3 * INPUT_H * INPUT_W * sizeof (float)));
-    CUDA_CHECK(cudaMalloc(&buffers[outputIndex], BATCH_SIZE * OUTPUT_SIZE * sizeof (float)));
+    CUDA_CHECK(cudaMalloc(&buffers[inputIndex_], BATCH_SIZE * 3 * INPUT_H * INPUT_W * sizeof (float)));
+    CUDA_CHECK(cudaMalloc(&buffers[outputIndex_], BATCH_SIZE * OUTPUT_SIZE * sizeof (float)));
 
     // Stream
     CUDA_CHECK(cudaStreamCreate(&stream_));
@@ -58,8 +58,8 @@ Detector::~Detector()
 {
     // release the stream and the buffers
     cudaStreamDestroy(stream_);
-    CUDA_CHECK(cudaFree(buffers[inputIndex]));
-    CUDA_CHECK(cudaFree(buffers[outputIndex]));
+    CUDA_CHECK(cudaFree(buffers[inputIndex_]));
+    CUDA_CHECK(cudaFree(buffers[outputIndex_]));
 
     // Destroy the engine
     context_->destroy();
@@ -80,10 +80,11 @@ void Detector::doInference(IExecutionContext& context, cudaStream_t& stream, voi
 }
 
 
-std::vector<Detections2D>> Detector::detect(cv::Mat& rgb_mat)
+std::vector<Detections2D> Detector::detect(cv_bridge::CvImagePtr rgb_image_ptr)
 {
     // Prepare the Input Data for the Engine
     // letterbox BGR to RGB
+    cv::Mat rgb_mat = rgb_image_ptr->image.clone();
     cv::Mat pr_img = preprocess_img(rgb_mat, INPUT_W, INPUT_H);
     int i = 0;
     int batch = 0;
@@ -103,15 +104,15 @@ std::vector<Detections2D>> Detector::detect(cv::Mat& rgb_mat)
     std::vector<std::vector < Yolo::Detection >> batch_res(BATCH_SIZE);
     auto& res = batch_res[batch];
     nms(res, &prob[batch * OUTPUT_SIZE], CONF_THRESH, NMS_THRESH);
-    std::vector<Detections2D>> detections_array;
+    std::vector<Detections2D> detections_array;
 
     for (auto &it : res) {
         Detections2D detection;
         cv::Rect r = get_rect(rgb_mat, it.bbox);
-        detection.bbox = r; // top_left_x, top_left_y, width_of_bbox, height_of_bbox
+        detection.rectangle_box = r; // top_left_x, top_left_y, width_of_bbox, height_of_bbox
         detection.classID = (int) it.class_id;
         detection.prob = it.conf;
-        detections_array.push_back(detection)
+        detections_array.push_back(detection);
     }
 
     return detections_array;

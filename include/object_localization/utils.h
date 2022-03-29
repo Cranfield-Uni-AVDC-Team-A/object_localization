@@ -1,3 +1,4 @@
+#pragma once
 #ifndef TRTX_YOLOV5_UTILS_H_
 #define TRTX_YOLOV5_UTILS_H_
 

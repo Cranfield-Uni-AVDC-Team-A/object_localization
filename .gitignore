@@ -3,4 +3,5 @@
 src/__pycache__/
 utils/__pycache__/__init__.cpython-36.pyc
 *.pyc
+models/*
 
