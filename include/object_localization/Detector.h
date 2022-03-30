@@ -11,6 +11,9 @@
 #include <opencv2/opencv.hpp>
 #include <cv_bridge/cv_bridge.h>
 
+/* ZED SDK */
+#include <sl/Camera.hpp>
+
 #define USE_FP16  // set USE_INT8 or USE_FP16 or USE_FP32
 #define DEVICE 0  // GPU id
 #define NMS_THRESH 0.4
@@ -53,7 +56,7 @@ public:
     ~Detector();
     void doInference(IExecutionContext& context, cudaStream_t& stream, void **buffers, float* input, float* output, int batchSize);
     //std::vector<Detections2D> detect(cv::Mat& rgb_mat);
-    std::vector<Detections2D> detect(cv_bridge::CvImagePtr rgb_image_ptr);
+    std::vector<sl::CustomBoxObjectData> detect(cv::Mat &rgb_mat);
 
 private:
     IRuntime* runtime_;

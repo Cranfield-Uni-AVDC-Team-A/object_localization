@@ -4,6 +4,7 @@
 #include <ros/package.h>
 #include <std_msgs/Header.h>
 #include <sensor_msgs/Image.h>
+#include <sensor_msgs/image_encodings.h>
 #include <uav_stack_msgs/BoundingBox2D.h>
 #include <uav_stack_msgs/Detector2D.h>
 #include <uav_stack_msgs/Detector2DArray.h>
@@ -20,10 +21,14 @@
 #include "object_localization/Detector.h"
 
 #include <opencv2/opencv.hpp>
+#include <opencv2/highgui/highgui.hpp>
 #include <cv_bridge/cv_bridge.h>
 #include <boost/thread.hpp>
 #include <mutex>
 #include <condition_variable>
+
+/* ZED SDK */
+#include <sl/Camera.hpp>
 
 
 
@@ -39,28 +44,31 @@ public:
 
     void cameraCallback(const sensor_msgs::ImageConstPtr& rgb_msg, const sensor_msgs::ImageConstPtr& depth_msg);
     struct Positions3D{float x; float y; float z; };
+    void timerCallback(const ros::wallTimerEvent& event);
 
 private:
     std::vector<ObjectLocatorNode::Positions3D> retrievePosition(std::vector<Detections2D>& detections2D_array,
                                                                  cv_bridge::CvImagePtr depth_image_ptr);
     
-    uav_stack_msgs::Detector3DArray composeMessages(std::vector<Detections2D>& detections2D_array, 
-                                                        std::vector<ObjectLocatorNode::Positions3D>& positions3D_array,
-                                                        std_msgs::Header current_header);
+    uav_stack_msgs::Detector3DArray composeMessages(sl::Objects objects, std_msgs::Header current_header);
     
-    void drawDetections(cv_bridge::CvImagePtr rgb_image_ptr, std::vector<Detections2D>&detections2D_array);
+    void drawDetections(cv::Mat &rgb_image, std::vector<sl::CustomBoxObjectData> &detections2D_array);
     
 
     ros::NodeHandle nh_;
     ros::NodeHandle nh_private_;
 
     image_transport::ImageTransport imageTransport_;
-    image_transport::SubscriberFilter rgbSubscriber_;
-    image_transport::SubscriberFilter depthSubscriber_;
-    std::unique_ptr<message_filters::Synchronizer<message_filters::sync_policies::ApproximateTime<sensor_msgs::Image, sensor_msgs::Image>>> sync_;
+    //image_transport::SubscriberFilter rgbSubscriber_;
+    //image_transport::SubscriberFilter depthSubscriber_;
+    //std::unique_ptr<message_filters::Synchronizer<message_filters::sync_policies::ApproximateTime<sensor_msgs::Image, sensor_msgs::Image>>> sync_;
 
     ros::Publisher objectDetectionsPublisher_;
     image_transport::Publisher overlayImagePublisher_;
+
+    ros::WallTimer timer_;
+
+    uint32_t counter_;
 
     std::unique_ptr<Detector> detector_;
     //std::vector<uav_stack_msgs::BoundingBox2D> detect_results_;
@@ -71,6 +79,19 @@ private:
     std::string overlayImageTopic_;
     
     bool publish_overlay_;
+    double duration_;
+
+
+    /* ZED SDK Instance */
+    sl::Camera zed_;
+    sl::InitParameters init_parameters_;
+
+    sl::Mat left_sl, point_cloud;
+    cv::Mat left_cv_rgb;
+    sl::ObjectDetectionRuntimeParameters objectTracker_parameters_rt;
+    sl::Objects objects;
+    sl::Pose cam_w_pose;
+    
 
 
     

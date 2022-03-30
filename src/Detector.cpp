@@ -80,11 +80,10 @@ void Detector::doInference(IExecutionContext& context, cudaStream_t& stream, voi
 }
 
 
-std::vector<Detections2D> Detector::detect(cv_bridge::CvImagePtr rgb_image_ptr)
+std::vector<sl::CustomBoxObjectData> Detector::detect(cv::Mat &rgb_mat)
 {
     // Prepare the Input Data for the Engine
     // letterbox BGR to RGB
-    cv::Mat rgb_mat = rgb_image_ptr->image;
     cv::Mat pr_img = preprocess_img(rgb_mat, INPUT_W, INPUT_H);
     int i = 0;
     int batch = 0;
@@ -105,15 +104,23 @@ std::vector<Detections2D> Detector::detect(cv_bridge::CvImagePtr rgb_image_ptr)
     auto& res = batch_res[batch];
     nms(res, &prob[batch * OUTPUT_SIZE], CONF_THRESH, NMS_THRESH);
     
-    std::vector<Detections2D> detections_array;
+    std::vector<sl::CustomBoxObjectData> objects_in;
     for (auto &it : res) {
-        Detections2D detection;
-        cv::Rect r = get_rect(rgb_mat, it.bbox);
-        detection.rectangle_box = r; // top_left_x, top_left_y, width_of_bbox, height_of_bbox
-        detection.classID = (int) it.class_id;
-        detection.prob = it.conf;
-        detections_array.push_back(detection);
+        sl::CustomBoxObjectData tmp;
+        v::Rect r = get_rect(left_cv_rgb, it.bbox);
+        // Fill the detections into the ZED SDK format
+        tmp.unique_object_id = sl::generate_unique_id();
+        tmp.probability = it.conf;
+        tmp.label = (int) it.class_id;
+        tmp.is_grounded = ((int) it.class_id == 0);
+        tmp.bounding_box_2d = cvt(r);
+        /**
+        * 0 ---- 1 
+        * |      |
+        * 3 -----2
+        */
+        objects_in.push_back(tmp);
     }
 
-    return detections_array;
+    return objects_in;
 }

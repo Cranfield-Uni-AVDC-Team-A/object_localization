@@ -15,6 +15,7 @@ ObjectLocatorNode::ObjectLocatorNode(const ros::NodeHandle &nh, const ros::NodeH
     int yoloClasses;
     double yoloThresh;
     double yoloNms;
+
     nh_private_.param("engine_name", engine_name, std::string("yolov5s.engine"));
     nh_private_.param("yolo_width", yoloW, 640);
     nh_private_.param("yolo_height", yoloH, 640);
@@ -23,21 +24,61 @@ ObjectLocatorNode::ObjectLocatorNode(const ros::NodeHandle &nh, const ros::NodeH
     nh_private_.param("yolo_nms_threshold", yoloNms, 0.25);
 
     // Publisher and Subscriber Topics
-    nh_private_.param("rgb_image_topic", rgbTopic_, std::string("/zed2/zed_node/left/image_rect_color"));
-    nh_private_.param("depth_image_topic", depthTopic_, std::string("/zed2/zed_node/depth/depth_registered"));
+    //nh_private_.param("rgb_image_topic", rgbTopic_, std::string("/zed2/zed_node/left/image_rect_color"));
+    // nh_private_.param("depth_image_topic", depthTopic_, std::string("/zed2/zed_node/depth/depth_registered"));
     nh_private_.param("object_detections_topic", objectDetectionsTopic_, std::string("/situational_awareness/object_detections"));
     nh_private_.param("overlay_image_topic", overlayImageTopic_, std::string("/situational_awareness/overlay_image"));
     nh_private_.param("publish_overlay", publish_overlay_, false);
+    nh_private_.param("timer_duration", duration_, 0.1);
 
     /* Setup the Synchronized subscriber */
-    rgbSubscriber_.subscribe(imageTransport_, rgbTopic_, 3);
-    depthSubscriber_.subscribe(imageTransport_, depthTopic_, 3);
-    sync_.reset(new message_filters::Synchronizer<message_filters::sync_policies::ApproximateTime<sensor_msgs::Image, sensor_msgs::Image>>(message_filters::sync_policies::ApproximateTime<sensor_msgs::Image, sensor_msgs::Image>(5), rgbSubscriber_, depthSubscriber_));
-    sync_->registerCallback(boost::bind(&ObjectLocatorNode::cameraCallback, this, _1, _2));
+    //rgbSubscriber_.subscribe(imageTransport_, rgbTopic_, 3);
+    //depthSubscriber_.subscribe(imageTransport_, depthTopic_, 3);
+    //sync_.reset(new message_filters::Synchronizer<message_filters::sync_policies::ApproximateTime<sensor_msgs::Image, sensor_msgs::Image>>(message_filters::sync_policies::ApproximateTime<sensor_msgs::Image, sensor_msgs::Image>(5), rgbSubscriber_, depthSubscriber_));
+    //sync_->registerCallback(boost::bind(&ObjectLocatorNode::cameraCallback, this, _1, _2));
+
+    /* Setup the Timer to Run Detection every 0.1s */
+    timer_ = nh_.createWallTimer(ros::WallDuration(duration_), &ObjectLocatorNode::timerCallback, this);
+
+
+    /**************************************************
+    Setup the ZED Camera directly through the SDK API 
+    ***************************************************/
+
+    // Opening the ZED camera before the model deserialization to avoid cuda context issue
+    init_parameters_.camera_resolution = sl::RESOLUTION::HD1080;
+    init_parameters_.sdk_verbose = true;
+    init_parameters_.depth_mode = sl::DEPTH_MODE::ULTRA;
+    //init_parameters_.coordinate_system = sl::COORDINATE_SYSTEM::RIGHT_HANDED_Y_UP; // OpenGL's coordinate system is right_handed
+    init_parameters_.coordinate_system = sl::COORDINATE_SYSTEM::RIGHT_HANDED_Z_UP_X_FWD; // Used in ROS (REP 103)
+
+    // Open the camera
+    auto returned_state = zed_.open(init_parameters);
+    if (returned_state != sl::ERROR_CODE::SUCCESS) {
+        print("Camera Open", returned_state, "Exit program.");
+    }
+    zed_.enablePositionalTracking();
+
+    // Custom Object Detection
+    sl::ObjectDetectionParameters detection_parameters;
+    detection_parameters.enable_tracking = true;
+    detection_parameters.enable_mask_output = false; // designed to give person pixel mask
+    detection_parameters.detection_model = sl::DETECTION_MODEL::CUSTOM_BOX_OBJECTS;
+    returned_state = zed_.enableObjectDetection(detection_parameters);
+    if (returned_state != sl::ERROR_CODE::SUCCESS) {
+        print("enableObjectDetection", returned_state, "\nExit program.");
+        zed_.close();
+    }
+
+    // Camera Configuration
+    auto camera_config = zed_.getCameraInformation().camera_configuration;
+    sl::Resolution pc_resolution(std::min((int) camera_config.resolution.width, 720), std::min((int) camera_config.resolution.height, 404));
+    auto camera_info = zed_.getCameraInformation(pc_resolution).camera_configuration;
+    cam_w_pose.pose_data.setIdentity();
 
     /* Setup the Publisher */
     objectDetectionsPublisher_ = nh_.advertise<uav_stack_msgs::Detector3DArray>(objectDetectionsTopic_,2, false);
-    
+    counter_ = 1;
     if(publish_overlay_ == true) {
         overlayImagePublisher_ = imageTransport_.advertise(overlayImageTopic_, 2);
     }
@@ -49,71 +90,73 @@ ObjectLocatorNode::ObjectLocatorNode(const ros::NodeHandle &nh, const ros::NodeH
 
 ObjectLocatorNode::~ObjectLocatorNode(){}
 
-void ObjectLocatorNode::cameraCallback(const sensor_msgs::ImageConstPtr& rgb_msg, const sensor_msgs::ImageConstPtr& depth_msg)
+void ObjectLocatorNode::timerCallback(const ros::wallTimerEvent& event)
 {
-    cv_bridge::CvImagePtr rgb_image_ptr;
-    cv_bridge::CvImagePtr depth_image_ptr;
-    
-    // Convert ROS Image MSG to CV::MAT
-    try {
-        rgb_image_ptr = cv_bridge::toCvCopy(rgb_msg, sensor_msgs::image_encodings::BGR8);
-        depth_image_ptr = cv_bridge::toCvCopy(depth_msg, sensor_msgs::image_encodings::TYPE_32FC1);
-    } catch (cv_bridge::Exception& e) {
-        ROS_ERROR("cv_bridge exception: %s", e.what());
-        return;
-    }
+    if (zed_.grap() == sl::ERROR_CODE::SUCCESS){
 
-    // Detect
-    std::vector<Detections2D> detections2D_array = detector_->detect(rgb_image_ptr);
+        
 
-    // Locate
-    std::vector<ObjectLocatorNode::Positions3D> positions3D_array
-        = retrievePosition(detections2D_array, depth_image_ptr);
+        zed_.retrieveImage(left_sl, sl::VIEW::LEFT);
 
-    // Compose the message
-    uav_stack_msgs::Detector3DArray detection_message = composeMessages(detections2D_array, 
-                                                                        positions3D_array, 
-                                                                        rgb_msg->header);
-    objectDetectionsPublisher_.publish(detection_message); // Publish it ~!
+        // Preparing inference
+        cv::Mat left_cv_rgba = slMat2cvMat(left_sl);
+        cv::cvtColor(left_cv_rgba, left_cv_rgb, cv::COLOR_BGRA2BGR); //remove alpha channel from RGB or BGR image
+        if (left_cv_rgb.empty()) continue;
 
-    
-    if(publish_overlay_ == true){   
+        // Detect
+        std::vector<sl::CustomBoxObjectData> detections2D_array = detector_->detect(left_cv_rgb);
+
+        // Send the custom detected boxes to the ZED SDK
+        zed_.ingestCustomBoxObjects(detections2D_array);
+
         // Draw the Overlay Image
-        drawDetections(rgb_image_ptr, detections2D_array);
-        overlayImagePublisher_.publish(rgb_image_ptr->toImageMsg());
+        if(publish_overlay_ == true){   
+            drawDetections(left_cv_rgb, detections2D_array);
+            std_msgs::Header header;
+            header.seq = counter_;
+            header.stamp = ros::Time::now();
+            headder.frame_id = "left_camera_optical_frame";
+            sensor_msgs::ImagePtr overlay_img_msg = cv_bridge::CvImage(header, "bgr8", left_cv_rgb).toImageMsg();
+            overlayImagePublisher_.publish(overlay_img_msg);
+        }
+
+        // Retrieve the tracked objects, with 2D and 3D attributes
+        zed_.retrieveObjects(objects, objectTracker_parameters_rt);
+        //zed_.retrieveMeasure(point_cloud, sl::MEASURE::XYZRGBA, sl::MEM::GPU, pc_resolution);
+        //zed_.getPosition(cam_w_pose, sl::REFERENCE_FRAME::WORLD);
+
+        uav_stack_msgs::Detector3DArray detection_message = composeMessages(objects, detections2D_array, header);
+        objectDetectionsPublisher_.publish(detection_message); // Publish it ~!
     }
 }
 
-uav_stack_msgs::Detector3DArray ObjectLocatorNode::composeMessages(std::vector<Detections2D>& detections2D_array, 
-                                                        std::vector<ObjectLocatorNode::Positions3D>& positions3D_array,
-                                                        std_msgs::Header current_header)
+
+uav_stack_msgs::Detector3DArray ObjectLocatorNode::composeMessages(sl::Objects objects, std_msgs::Header current_header)
 {   
     uav_stack_msgs::Detector3DArray detection3D_array;
     detection3D_array.header = current_header;
 
-    for (size_t i = 0; i<detections2D_array.size(); i++){
-        
-        //Detections2D detection2D = detections2D_array[i];
-        //ObjectLocatorNode::Positions3D pos_3D = positions3D_array[i];
+    for(auto object : objects.object_list){
         uav_stack_msgs::Detector3D detection3D;
-
         detection3D.header = current_header;
+
+        detection3D.results.id = object.unique_object_id;   // string
+        detection3D.results.score = object.confidence;      // float
         
-        detection3D.results.id = std::to_string(detections2D_array[i].classID) + "_" + std::to_string(current_header.stamp.sec);
-        detection3D.results.score = detections2D_array[i].prob;
+        cv::Point pt1(object.bounding_box_2d[0][0], object.bounding_box_2d[0][1]);
+        cv::Point pt2(object.bounding_box_2d[1][0], object.bounding_box_2d[1][1]);
+        cv::Point pt3(object.bounding_box_2d[2][0], object.bounding_box_2d[2][1]);
+        cv::Point pt4(object.bounding_box_2d[3][0], object.bounding_box_2d[3][1]);
 
-        detection3D.bbox.center.x = (double) detections2D_array[i].rectangle_box.x + 
-                                            (detections2D_array[i].rectangle_box.width/2);
+        detection3D.bbox.size_x = (float) abs((object.bounding_box_2d[1][0] - object.bounding_box_2d[0][0]) / 2.0);
+        detection3D.bbox.size_y = (float) abs((object.bounding_box_2d[3][1] - object.bounding_box_2d[0][1]) / 2.0);
+        
+        detection3D.bbox.center.x = (double) (object.bounding_box_2d[0][0] + (detection3D.bbox.size_x / 2));
+        detection3D.bbox.center.y = (double) (object.bounding_box_2d[0][1] + (detection3D.bbox.size_y / 2));
 
-        detection3D.bbox.center.y = (double) detections2D_array[i].rectangle_box.y + 
-                                            (detections2D_array[i].rectangle_box.height/2);
-
-        detection3D.bbox.size_x = (float) detections2D_array[i].rectangle_box.width;
-        detection3D.bbox.size_y = (float) detections2D_array[i].rectangle_box.height;
-
-        detection3D.positions.x = (double) positions3D_array[i].x;
-        detection3D.positions.y = (double) positions3D_array[i].y;
-        detection3D.positions.z = (double) positions3D_array[i].z;
+        detection3D.positions.x = (double) object.position[0];
+        detection3D.positions.y = (double) object.position[1];
+        detection3D.positions.z = (double) object.position[2];
 
         detection3D_array.detections.push_back(detection3D);
     }
@@ -122,41 +165,14 @@ uav_stack_msgs::Detector3DArray ObjectLocatorNode::composeMessages(std::vector<D
 
 }
 
-
-
-std::vector<ObjectLocatorNode::Positions3D> ObjectLocatorNode::retrievePosition(std::vector<Detections2D>& detections2D_array, cv_bridge::CvImagePtr depth_image_ptr)
+void ObjectLocatorNode::drawDetections(cv::Mat &rgb_image, std::vector<sl::CustomBoxObjectData> &detections2D_array)
 {
-    cv::Mat depth_mat = depth_image_ptr->image; 
-    std::vector<ObjectLocatorNode::Positions3D> positions3D_array;
-    float cam_info_cx = 619.28302;
-    float cam_info_cy = 58.944061;
-    float cam_info_fx = 529.12689;
-    float cam_info_fy = 529.12689;
-
     for(auto &detection : detections2D_array){
-        float center_x = detection.rectangle_box.x + (detection.rectangle_box.width/2);
-        float center_y = detection.rectangle_box.y + (detection.rectangle_box.height/2);
-        float depth = depth_mat.at<float>((int)center_y, (int)center_x);
+        cv::Point pt1(detection.bounding_box_2d[0][0], detection.bounding_box_2d[0][1]);
+        cv::Point pt2(detection.bounding_box_2d[2][0], detection.bounding_box_2d[2][1]);
 
-        ObjectLocatorNode::Positions3D pos_3D;
-        pos_3D.x = depth * ((center_x - cam_info_cx) / cam_info_fx);
-        pos_3D.y = depth* ((center_y - cam_info_cy) / cam_info_fy);
-        pos_3D.z = depth;
-
-        positions3D_array.push_back(pos_3D);
-    }
-
-    return positions3D_array;
-}
-
-
-
-void ObjectLocatorNode::drawDetections(cv_bridge::CvImagePtr rgb_image_ptr, std::vector<Detections2D> &detections2D_array)
-{
-    cv::Mat img = rgb_image_ptr->image;
-    for(auto &detection : detections2D_array){
-        cv::rectangle(img, detection.rectangle_box, cv::Scalar(0, 255, 0));
-        cv::putText(img, std::to_string((int) detection.classID), cv::Point(detection.rectangle_box.x, detection.rectangle_box.y - 1), cv::FONT_HERSHEY_PLAIN, 1.2, cv::Scalar(0xFF, 0xFF, 0xFF), 2);
+        cv::rectangle(rgb_image, pt1, pt2, cv::Scalar(0, 255, 0));
+        cv::putText(rgb_image, std::to_string(detection.label), cv::Point(pt1.x, pt1.y - 1), cv::FONT_HERSHEY_PLAIN, 1.2, cv::Scalar(0xFF, 0xFF, 0xFF), 2);
     }
 }
 
