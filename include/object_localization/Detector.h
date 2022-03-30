@@ -57,6 +57,7 @@ public:
     void doInference(IExecutionContext& context, cudaStream_t& stream, void **buffers, float* input, float* output, int batchSize);
     //std::vector<Detections2D> detect(cv::Mat& rgb_mat);
     std::vector<sl::CustomBoxObjectData> detect(cv::Mat &rgb_mat);
+    std::vector<sl::uint2> cvt(const cv::Rect &bbox_in);
 
 private:
     IRuntime* runtime_;

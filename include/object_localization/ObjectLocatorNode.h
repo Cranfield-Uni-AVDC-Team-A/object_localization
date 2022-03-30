@@ -22,6 +22,7 @@
 
 #include <opencv2/opencv.hpp>
 #include <opencv2/highgui/highgui.hpp>
+#include <opencv2/cvconfig.h>
 #include <cv_bridge/cv_bridge.h>
 #include <boost/thread.hpp>
 #include <mutex>
@@ -44,7 +45,7 @@ public:
 
     void cameraCallback(const sensor_msgs::ImageConstPtr& rgb_msg, const sensor_msgs::ImageConstPtr& depth_msg);
     struct Positions3D{float x; float y; float z; };
-    void timerCallback(const ros::wallTimerEvent& event);
+    void timerCallback(const ros::WallTimerEvent& event);
 
 private:
     std::vector<ObjectLocatorNode::Positions3D> retrievePosition(std::vector<Detections2D>& detections2D_array,
@@ -54,6 +55,10 @@ private:
     
     void drawDetections(cv::Mat &rgb_image, std::vector<sl::CustomBoxObjectData> &detections2D_array);
     
+    void print(std::string msg_prefix, sl::ERROR_CODE err_code, std::string msg_suffix);
+    
+    cv::Mat slMat2cvMat(sl::Mat& input);
+    int getOCVtype(sl::MAT_TYPE type);
 
     ros::NodeHandle nh_;
     ros::NodeHandle nh_private_;

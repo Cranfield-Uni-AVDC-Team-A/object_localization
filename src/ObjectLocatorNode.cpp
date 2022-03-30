@@ -46,14 +46,14 @@ ObjectLocatorNode::ObjectLocatorNode(const ros::NodeHandle &nh, const ros::NodeH
     ***************************************************/
 
     // Opening the ZED camera before the model deserialization to avoid cuda context issue
-    init_parameters_.camera_resolution = sl::RESOLUTION::HD1080;
+    init_parameters_.camera_resolution = sl::RESOLUTION::HD720;
     init_parameters_.sdk_verbose = true;
-    init_parameters_.depth_mode = sl::DEPTH_MODE::ULTRA;
+    init_parameters_.depth_mode = sl::DEPTH_MODE::PERFORMANCE;
     //init_parameters_.coordinate_system = sl::COORDINATE_SYSTEM::RIGHT_HANDED_Y_UP; // OpenGL's coordinate system is right_handed
     init_parameters_.coordinate_system = sl::COORDINATE_SYSTEM::RIGHT_HANDED_Z_UP_X_FWD; // Used in ROS (REP 103)
 
     // Open the camera
-    auto returned_state = zed_.open(init_parameters);
+    auto returned_state = zed_.open(init_parameters_);
     if (returned_state != sl::ERROR_CODE::SUCCESS) {
         print("Camera Open", returned_state, "Exit program.");
     }
@@ -77,7 +77,7 @@ ObjectLocatorNode::ObjectLocatorNode(const ros::NodeHandle &nh, const ros::NodeH
     cam_w_pose.pose_data.setIdentity();
 
     /* Setup the Publisher */
-    objectDetectionsPublisher_ = nh_.advertise<uav_stack_msgs::Detector3DArray>(objectDetectionsTopic_,2, false);
+    objectDetectionsPublisher_ = nh_.advertise<uav_stack_msgs::Detector3DArray>(objectDetectionsTopic_,10, false);
     counter_ = 1;
     if(publish_overlay_ == true) {
         overlayImagePublisher_ = imageTransport_.advertise(overlayImageTopic_, 2);
@@ -90,43 +90,52 @@ ObjectLocatorNode::ObjectLocatorNode(const ros::NodeHandle &nh, const ros::NodeH
 
 ObjectLocatorNode::~ObjectLocatorNode(){}
 
-void ObjectLocatorNode::timerCallback(const ros::wallTimerEvent& event)
+void ObjectLocatorNode::timerCallback(const ros::WallTimerEvent& event)
 {
-    if (zed_.grap() == sl::ERROR_CODE::SUCCESS){
-
-        
-
+    if (zed_.grab() == sl::ERROR_CODE::SUCCESS)
+    {
+	std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
         zed_.retrieveImage(left_sl, sl::VIEW::LEFT);
 
         // Preparing inference
         cv::Mat left_cv_rgba = slMat2cvMat(left_sl);
         cv::cvtColor(left_cv_rgba, left_cv_rgb, cv::COLOR_BGRA2BGR); //remove alpha channel from RGB or BGR image
-        if (left_cv_rgb.empty()) continue;
+        if (left_cv_rgb.empty()) {std::cout << "Image is empty ! Error !" << std::endl;}
 
         // Detect
+
         std::vector<sl::CustomBoxObjectData> detections2D_array = detector_->detect(left_cv_rgb);
+
 
         // Send the custom detected boxes to the ZED SDK
         zed_.ingestCustomBoxObjects(detections2D_array);
-
-        // Draw the Overlay Image
-        if(publish_overlay_ == true){   
-            drawDetections(left_cv_rgb, detections2D_array);
-            std_msgs::Header header;
-            header.seq = counter_;
-            header.stamp = ros::Time::now();
-            headder.frame_id = "left_camera_optical_frame";
-            sensor_msgs::ImagePtr overlay_img_msg = cv_bridge::CvImage(header, "bgr8", left_cv_rgb).toImageMsg();
-            overlayImagePublisher_.publish(overlay_img_msg);
-        }
 
         // Retrieve the tracked objects, with 2D and 3D attributes
         zed_.retrieveObjects(objects, objectTracker_parameters_rt);
         //zed_.retrieveMeasure(point_cloud, sl::MEASURE::XYZRGBA, sl::MEM::GPU, pc_resolution);
         //zed_.getPosition(cam_w_pose, sl::REFERENCE_FRAME::WORLD);
 
-        uav_stack_msgs::Detector3DArray detection_message = composeMessages(objects, detections2D_array, header);
+	std_msgs::Header header;
+	header.seq = counter_;
+	header.stamp = ros::Time::now();
+	header.frame_id = "left_camera_optical_frame";
+        uav_stack_msgs::Detector3DArray detection_message = composeMessages(objects, header);
         objectDetectionsPublisher_.publish(detection_message); // Publish it ~!
+
+	std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
+	double time_spent = (double) std::chrono::duration_cast<std::chrono::microseconds>(end-begin).count();
+	double FPS = 1.0 / (time_spent * 0.000001);
+	std::cout << "time spent= " << time_spent << " [us]" << std::endl;
+	std::cout << "FPS = " << FPS << std::endl;
+
+	// Draw the Overlay Image
+        if(publish_overlay_ == true)
+	{   
+            drawDetections(left_cv_rgb, detections2D_array);
+            sensor_msgs::ImagePtr overlay_img_msg = cv_bridge::CvImage(header, "bgr8", left_cv_rgb).toImageMsg();
+            overlayImagePublisher_.publish(overlay_img_msg);
+        }
+	counter_++;
     }
 }
 
@@ -176,8 +185,43 @@ void ObjectLocatorNode::drawDetections(cv::Mat &rgb_image, std::vector<sl::Custo
     }
 }
 
+void ObjectLocatorNode::print(std::string msg_prefix, sl::ERROR_CODE err_code, std::string msg_suffix) {
+    std::cout << "[Sample] ";
+    if (err_code != sl::ERROR_CODE::SUCCESS)
+        std::cout << "[Error] ";
+    std::cout << msg_prefix << " ";
+    if (err_code != sl::ERROR_CODE::SUCCESS) {
+        std::cout << " | " << toString(err_code) << " : ";
+        std::cout << toVerbose(err_code);
+    }
+    if (!msg_suffix.empty())
+        std::cout << " " << msg_suffix;
+    std::cout << std::endl;
+}
 
 
+// Mapping between MAT_TYPE and CV_TYPE
+int ObjectLocatorNode::getOCVtype(sl::MAT_TYPE type) {
+    int cv_type = -1;
+    switch (type) {
+    	case sl::MAT_TYPE::F32_C1: cv_type = CV_32FC1; break;
+    	case sl::MAT_TYPE::F32_C2: cv_type = CV_32FC2; break;
+    	case sl::MAT_TYPE::F32_C3: cv_type = CV_32FC3; break;
+    	case sl::MAT_TYPE::F32_C4: cv_type = CV_32FC4; break;
+    	case sl::MAT_TYPE::U8_C1: cv_type = CV_8UC1; break;
+    	case sl::MAT_TYPE::U8_C2: cv_type = CV_8UC2; break;
+    	case sl::MAT_TYPE::U8_C3: cv_type = CV_8UC3; break;
+    	case sl::MAT_TYPE::U8_C4: cv_type = CV_8UC4; break;
+        default: break;
+    }
+    return cv_type;
+}
+
+cv::Mat ObjectLocatorNode::slMat2cvMat(sl::Mat& input) {
+    // Since cv::Mat data requires a uchar* pointer, we get the uchar1 pointer from sl::Mat (getPtr<T>())
+    // cv::Mat and sl::Mat will share a single memory structure
+    return cv::Mat(input.getHeight(), input.getWidth(), getOCVtype(input.getDataType()), input.getPtr<sl::uchar1>(sl::MEM::CPU), input.getStepBytes(sl::MEM::CPU));
+}
 
 
 

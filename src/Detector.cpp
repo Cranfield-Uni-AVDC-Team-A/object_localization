@@ -79,6 +79,14 @@ void Detector::doInference(IExecutionContext& context, cudaStream_t& stream, voi
 
 }
 
+std::vector<sl::uint2> Detector::cvt(const cv::Rect &bbox_in){
+    std::vector<sl::uint2> bbox_out(4);
+    bbox_out[0] = sl::uint2(bbox_in.x, bbox_in.y);
+    bbox_out[1] = sl::uint2(bbox_in.x + bbox_in.width, bbox_in.y);
+    bbox_out[2] = sl::uint2(bbox_in.x + bbox_in.width, bbox_in.y + bbox_in.height);
+    bbox_out[3] = sl::uint2(bbox_in.x, bbox_in.y + bbox_in.height);
+    return bbox_out;
+}
 
 std::vector<sl::CustomBoxObjectData> Detector::detect(cv::Mat &rgb_mat)
 {
@@ -107,7 +115,7 @@ std::vector<sl::CustomBoxObjectData> Detector::detect(cv::Mat &rgb_mat)
     std::vector<sl::CustomBoxObjectData> objects_in;
     for (auto &it : res) {
         sl::CustomBoxObjectData tmp;
-        v::Rect r = get_rect(left_cv_rgb, it.bbox);
+        cv::Rect r = get_rect(rgb_mat, it.bbox);
         // Fill the detections into the ZED SDK format
         tmp.unique_object_id = sl::generate_unique_id();
         tmp.probability = it.conf;
