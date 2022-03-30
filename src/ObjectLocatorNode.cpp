@@ -148,26 +148,39 @@ uav_stack_msgs::Detector3DArray ObjectLocatorNode::composeMessages(sl::Objects o
     for(auto object : objects.object_list){
         uav_stack_msgs::Detector3D detection3D;
         detection3D.header = current_header;
+	
+	// ObjectHypothesis
+        detection3D.results.unique_id = object.unique_object_id;   // string
+        detection3D.results.class_id = object.raw_label;           // string
+        detection3D.results.score = object.confidence;             // float
+	
+	// Tracking
+	detection3D.tracker_id = object.id;
 
-        detection3D.results.id = object.unique_object_id;   // string
-        detection3D.results.score = object.confidence;      // float
+	sl::OBJECT_TRACKING_STATE object_tracking_state = object.tracking_state;
+	if(object_tracking_state == sl::OBJECT_TRACKING_STATE::OK) 
+		{ detection3D.is_tracked = true; }
+	else 
+		{ detection3D.is_tracked = false; }
         
-        cv::Point pt1(object.bounding_box_2d[0][0], object.bounding_box_2d[0][1]);
-        cv::Point pt2(object.bounding_box_2d[1][0], object.bounding_box_2d[1][1]);
-        cv::Point pt3(object.bounding_box_2d[2][0], object.bounding_box_2d[2][1]);
-        cv::Point pt4(object.bounding_box_2d[3][0], object.bounding_box_2d[3][1]);
-
+	// Bounding box
         detection3D.bbox.size_x = (float) abs((object.bounding_box_2d[1][0] - object.bounding_box_2d[0][0]) / 2.0);
         detection3D.bbox.size_y = (float) abs((object.bounding_box_2d[3][1] - object.bounding_box_2d[0][1]) / 2.0);
         
         detection3D.bbox.center.x = (double) (object.bounding_box_2d[0][0] + (detection3D.bbox.size_x / 2));
         detection3D.bbox.center.y = (double) (object.bounding_box_2d[0][1] + (detection3D.bbox.size_y / 2));
-
-        detection3D.positions.x = (double) object.position[0];
-        detection3D.positions.y = (double) object.position[1];
-        detection3D.positions.z = (double) object.position[2];
-
-        detection3D_array.detections.push_back(detection3D);
+	
+	// Position w.r.t Camera Frame
+        detection3D.position.x = (double) object.position[0];
+        detection3D.position.y = (double) object.position[1];
+        detection3D.position.z = (double) object.position[2];
+	
+	// Velocity w.r.t Camera Frame
+        detection3D.velocity.x = (double) object.velocity[0];
+        detection3D.velocity.y = (double) object.velocity[1];
+        detection3D.velocity.z = (double) object.velocity[2];
+        
+	detection3D_array.detections.push_back(detection3D);
     }
 
     return detection3D_array;
