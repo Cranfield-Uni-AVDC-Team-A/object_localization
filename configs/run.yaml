@@ -9,8 +9,8 @@ yolo:
 publishers:
         object_detections_topic: /situational_awareness/object_detections
         overlay_image_topic: /situational_awareness/overlay_image
-        publish_overlay: false
+        publish_overlay: true
 
 runtime:
         timer_duration: 0.1
-        sdk_locating_: true
+        sdk_locating_: false

@@ -282,10 +282,10 @@ geometry_msgs::Point ObjectLocatorNode::retrievePositionFromDepth(sl::ObjectData
 {
     geometry_msgs::Point location3D;
 
-    float xmin = (float) (object.bounding_box_2d[0][0]) / depth_mat.getWidth();
-    float ymin = (float) (object.bounding_box_2d[0][1]) / depth_mat.getHeight();
-    float xmax = (float) (object.bounding_box_2d[2][0]) / depth_mat.getWidth();
-    float ymax = (float) (object.bounding_box_2d[2][1]) / depth_mat.getHeight();
+    float xmin = (float) (object.bounding_box_2d[0][0]); // / depth_mat.getWidth();
+    float ymin = (float) (object.bounding_box_2d[0][1]); // / depth_mat.getHeight();
+    float xmax = (float) (object.bounding_box_2d[2][0]); // /depth_mat.getWidth();
+    float ymax = (float) (object.bounding_box_2d[2][1]); // /depth_mat.getHeight();
     std::vector<float>depth_arr;
     float x, y, d;
     int refs = 3;
@@ -298,7 +298,9 @@ geometry_msgs::Point ObjectLocatorNode::retrievePositionFromDepth(sl::ObjectData
             x = xmin + j*(xmax-xmin)/(refs+1);
             y = ymin + i*(ymax-ymin)/(refs+1);
             //d = depth_cv.at<float>((int)(y*depth_cv.rows), (int)(x*depth_cv.cols));
-            depth_mat.getValue((int)(x*depth_mat.getWidth()), (int)(y*depth_mat.getHeight()), &d);
+            //depth_mat.getValue((int)(x*depth_mat.getWidth()), (int)(y*depth_mat.getHeight()), &d);
+	    std::cout << "[DEBUG] X : " << x << " Y: " << y << std::endl;
+            depth_mat.getValue((int)x, (int)y, &d);
             if (std::isnormal(d)) depth_arr.push_back(d);
         }
     }

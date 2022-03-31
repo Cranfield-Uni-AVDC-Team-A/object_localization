@@ -79,7 +79,7 @@ void Detector::doInference(IExecutionContext& context, cudaStream_t& stream, voi
 
 }
 
-std::vector<sl::uint2> Detector::cvt(const cv::Rect &bbox_in){
+std::vector<sl::uint2> Detector::cvt(const cv::Rect &bbox_in) {
     std::vector<sl::uint2> bbox_out(4);
     bbox_out[0] = sl::uint2(bbox_in.x, bbox_in.y);
     bbox_out[1] = sl::uint2(bbox_in.x + bbox_in.width, bbox_in.y);
@@ -111,7 +111,7 @@ std::vector<sl::CustomBoxObjectData> Detector::detect(cv::Mat &rgb_mat)
     std::vector<std::vector < Yolo::Detection >> batch_res(BATCH_SIZE);
     auto& res = batch_res[batch];
     nms(res, &prob[batch * OUTPUT_SIZE], CONF_THRESH, NMS_THRESH);
-    
+
     std::vector<sl::CustomBoxObjectData> objects_in;
     for (auto &it : res) {
         sl::CustomBoxObjectData tmp;
@@ -123,10 +123,21 @@ std::vector<sl::CustomBoxObjectData> Detector::detect(cv::Mat &rgb_mat)
         tmp.is_grounded = ((int) it.class_id == 0);
         tmp.bounding_box_2d = cvt(r);
         /**
-        * 0 ---- 1 
+        * 0 ---- 1
         * |      |
         * 3 -----2
         */
+        /**
+            float size_y = (tmp.bounding_box_2d[3][1]-tmp.bounding_box_2d[0][1]);
+            float size_x = (tmp.bounding_box_2d[1][0]-tmp.bounding_box_2d[0][0]);
+
+            if (size_y < 500.0 && size_x < 500.0) {
+            	objects_in.push_back(tmp);
+            }
+        else
+        	std::cout << "Object too big to be real" << std::endl;
+        **/
+
         objects_in.push_back(tmp);
     }
 
