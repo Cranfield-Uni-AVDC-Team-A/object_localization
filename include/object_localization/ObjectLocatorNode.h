@@ -33,10 +33,12 @@
 
 
 
-namespace situational_awareness{
+namespace situational_awareness
+{
 
 
-class ObjectLocatorNode{
+class ObjectLocatorNode
+{
 
 public:
     ObjectLocatorNode(const ros::NodeHandle &nh, const ros::NodeHandle &nh_private);
@@ -44,19 +46,26 @@ public:
     ~ObjectLocatorNode();
 
     void cameraCallback(const sensor_msgs::ImageConstPtr& rgb_msg, const sensor_msgs::ImageConstPtr& depth_msg);
-    struct Positions3D{float x; float y; float z; };
+    struct Positions3D
+    {
+        float x;
+        float y;
+        float z;
+    };
     void timerCallback(const ros::WallTimerEvent& event);
 
 private:
     std::vector<ObjectLocatorNode::Positions3D> retrievePosition(std::vector<Detections2D>& detections2D_array,
-                                                                 cv_bridge::CvImagePtr depth_image_ptr);
-    
-    uav_stack_msgs::Detector3DArray composeMessages(sl::Objects objects, std_msgs::Header current_header);
-    
+            cv_bridge::CvImagePtr depth_image_ptr);
+
+    geometry_msgs::Point retrievePositionFromDepth(sl::ObjectData &object, sl::Mat &depth_mat);
+
+    uav_stack_msgs::Detector3DArray composeMessages(sl::Objects &objects, std_msgs::Header current_header, sl::Resolution img_resolution);
+
     void drawDetections(cv::Mat &rgb_image, std::vector<sl::CustomBoxObjectData> &detections2D_array);
-    
+
     void print(std::string msg_prefix, sl::ERROR_CODE err_code, std::string msg_suffix);
-    
+
     cv::Mat slMat2cvMat(sl::Mat& input);
     int getOCVtype(sl::MAT_TYPE type);
 
@@ -82,10 +91,10 @@ private:
     std::string depthTopic_;
     std::string objectDetectionsTopic_;
     std::string overlayImageTopic_;
-    
+
     bool publish_overlay_;
     double duration_;
-
+    bool sdk_locating_;
 
     /* ZED SDK Instance */
     sl::Camera zed_;
@@ -96,10 +105,14 @@ private:
     sl::ObjectDetectionRuntimeParameters objectTracker_parameters_rt;
     sl::Objects objects;
     sl::Pose cam_w_pose;
-    
+
+    float cam_info_cx = 619.2830200195312;
+    float cam_info_cy = 58.9440612792969;
+    float cam_info_fx = 529.1268920898438;
+    float cam_info_fy = 529.1268920898438;
 
 
-    
+
 
 
 

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<launch>
+  <!-- Load parameters -->
+  <arg name="ros_param_file"       				default="$(find object_localization)/configs/run.yaml"/>
+  <rosparam command="load" ns="object_localization" 		file="$(arg ros_param_file)"/>
+
+  <!-- Start darknet and ros wrapper -->
+  <node pkg="object_localization" type="object_localization" name="object_localization"/>
+</launch>
