@@ -134,18 +134,52 @@ std::vector<ObjectLocatorNode::Positions3D> ObjectLocatorNode::retrievePosition(
     float cam_info_fy = 529.12689;
 
     for(auto &detection : detections2D_array){
-        float center_x = detection.rectangle_box.x + (detection.rectangle_box.width/2);
-        float center_y = detection.rectangle_box.y + (detection.rectangle_box.height/2);
-        float depth = depth_mat.at<float>((int)center_y, (int)center_x);
+        //float center_x = detection.rectangle_box.x + (detection.rectangle_box.width/2);
+        //float center_y = detection.rectangle_box.y + (detection.rectangle_box.height/2);
+        float xmin = detection.rectangle_box.x;
+        float ymin = detection.rectangle_box.y;
+        float xmax = detection.rectangle_box.x + detection.rectangle_box.width;
+        float ymax = detection.rectangle_box.y + detection.rectangle_box.height;
+        std::vector<float>depth_arr;
+        float x, y, d;
+        int refs = 3;
+        float depth;
+        for (int i = 1; i < refs+1; ++i)
+        {
+            for(int j = 1; j < refs+1; ++j)
+            {
+                x = xmin + j*(xmax-xmin)/(refs+1);
+                y = ymin + i*(ymax-ymin)/(refs+1);
+	            //std::cout << "[DEBUG] X : " << x << " Y: " << y << std::endl;
+                d = depth_mat.at<float>((int)center_y, (int)center_x);
+                if (std::isnormal(d)) depth_arr.push_back(d);
+            }
+        }
+        std::sort(depth_arr.begin(), depth_arr.end());
 
+        if (depth_arr.size() > 1)
+            depth = depth_arr[1];
+        else if (depth_arr.size() == 1)
+            depth = depth_arr[0];
+        else
+            depth = NAN;
+        
         ObjectLocatorNode::Positions3D pos_3D;
-        pos_3D.x = depth * ((center_x - cam_info_cx) / cam_info_fx);
-        pos_3D.y = depth* ((center_y - cam_info_cy) / cam_info_fy);
-        pos_3D.z = depth;
+        if (std::isfinite(depth))
+        {
+            pos_3D.x = depth * ((center_x - cam_info_cx) / cam_info_fx);
+            pos_3D.y = depth* ((center_y - cam_info_cy) / cam_info_fy);
+            pos_3D.z = depth;
 
-        positions3D_array.push_back(pos_3D);
+            positions3D_array.push_back(pos_3D);
+        }
+        else {
+            std::cout << "The Distance can not be computed" << std::endl;
+            pos_3D.x = 0.0;
+            pos_3D.y = 0.0;
+            pos_3D.z  = 0.0;
+        }
     }
-
     return positions3D_array;
 }
 
