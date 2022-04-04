@@ -111,9 +111,9 @@ uav_stack_msgs::Detector3DArray ObjectLocatorNode::composeMessages(std::vector<D
         detection3D.bbox.size_x = (float) detections2D_array[i].rectangle_box.width;
         detection3D.bbox.size_y = (float) detections2D_array[i].rectangle_box.height;
 
-        detection3D.positions.x = (double) positions3D_array[i].x;
-        detection3D.positions.y = (double) positions3D_array[i].y;
-        detection3D.positions.z = (double) positions3D_array[i].z;
+        detection3D.position.x = (double) positions3D_array[i].x;
+        detection3D.position.y = (double) positions3D_array[i].y;
+        detection3D.position.z = (double) positions3D_array[i].z;
 
         detection3D_array.detections.push_back(detection3D);
     }
