@@ -1,0 +1,16 @@
+yolo:
+        engine_name: yolov5s.engine
+        nn_width: 640
+        nn_height: 640
+        classes: 2
+        detection_threshold: 0.998
+        nms_threshold: 0.25
+
+publishers:
+        object_detections_topic: /situational_awareness/object_detections
+        overlay_image_topic: /situational_awareness/overlay_image
+        publish_overlay: true
+
+runtime:
+        timer_duration: 0.1
+        sdk_locating_: false

@@ -23,11 +23,11 @@ ObjectLocatorNode::ObjectLocatorNode(const ros::NodeHandle &nh, const ros::NodeH
     nh_private_.param("yolo_nms_threshold", yoloNms, 0.25);
 
     // Publisher and Subscriber Topics
-    nh_private_.param("rgb_image_topic", rgbTopic_, std::string("/zed2/zed_node/left/image_rect_color"));
-    nh_private_.param("depth_image_topic", depthTopic_, std::string("/zed2/zed_node/depth/depth_registered"));
+    nh_private_.param("rgb_image_topic", rgbTopic_, std::string("/realsense_d435i/color/image_raw"));
+    nh_private_.param("depth_image_topic", depthTopic_, std::string("/realsense_d435i/depth/image_raw"));
     nh_private_.param("object_detections_topic", objectDetectionsTopic_, std::string("/situational_awareness/object_detections"));
     nh_private_.param("overlay_image_topic", overlayImageTopic_, std::string("/situational_awareness/overlay_image"));
-    nh_private_.param("publish_overlay", publish_overlay_, false);
+    nh_private_.param("publish_overlay", publish_overlay_, true);
 
     /* Setup the Synchronized subscriber */
     rgbSubscriber_.subscribe(imageTransport_, rgbTopic_, 3);
@@ -57,7 +57,7 @@ void ObjectLocatorNode::cameraCallback(const sensor_msgs::ImageConstPtr& rgb_msg
     // Convert ROS Image MSG to CV::MAT
     try {
         rgb_image_ptr = cv_bridge::toCvCopy(rgb_msg, sensor_msgs::image_encodings::BGR8);
-        depth_image_ptr = cv_bridge::toCvCopy(depth_msg, sensor_msgs::image_encodings::TYPE_32FC1);
+        depth_image_ptr = cv_bridge::toCvCopy(depth_msg, sensor_msgs::image_encodings::TYPE_16UC1);
     } catch (cv_bridge::Exception& e) {
         ROS_ERROR("cv_bridge exception: %s", e.what());
         return;
@@ -128,10 +128,10 @@ std::vector<ObjectLocatorNode::Positions3D> ObjectLocatorNode::retrievePosition(
 {
     cv::Mat depth_mat = depth_image_ptr->image; 
     std::vector<ObjectLocatorNode::Positions3D> positions3D_array;
-    float cam_info_cx = 619.28302;
-    float cam_info_cy = 58.944061;
-    float cam_info_fx = 529.12689;
-    float cam_info_fy = 529.12689;
+    float cam_info_cx = 320.5;
+    float cam_info_cy = 240.5;
+    float cam_info_fx = 639.997649;
+    float cam_info_fy = 639.997649;
 
     for(auto &detection : detections2D_array){
         //float center_x = detection.rectangle_box.x + (detection.rectangle_box.width/2);
@@ -140,21 +140,33 @@ std::vector<ObjectLocatorNode::Positions3D> ObjectLocatorNode::retrievePosition(
         float ymin = detection.rectangle_box.y;
         float xmax = detection.rectangle_box.x + detection.rectangle_box.width;
         float ymax = detection.rectangle_box.y + detection.rectangle_box.height;
+        float x_center = detection.rectangle_box.x + (detection.rectangle_box.width/2);
+        float y_center = detection.rectangle_box.y + (detection.rectangle_box.height/2);
+
         std::vector<float>depth_arr;
         float x, y, d;
         int refs = 3;
         float depth;
+        /*
         for (int i = 1; i < refs+1; ++i)
         {
             for(int j = 1; j < refs+1; ++j)
             {
                 x = xmin + j*(xmax-xmin)/(refs+1);
                 y = ymin + i*(ymax-ymin)/(refs+1);
-	            //std::cout << "[DEBUG] X : " << x << " Y: " << y << std::endl;
-                d = depth_mat.at<float>((int)center_y, (int)center_x);
-                if (std::isnormal(d)) depth_arr.push_back(d);
+                d = depth_mat.at<float>((int)x, (int)y);
+                if (std::isnormal(d)){
+                    depth_arr.push_back(d);
+                    /*
+                    if (d < mindepth){
+                        mindepth = d;
+                        x_idx = x;
+                        y_idx = y;
+                    
+                }
             }
         }
+        
         std::sort(depth_arr.begin(), depth_arr.end());
 
         if (depth_arr.size() > 1)
@@ -163,12 +175,15 @@ std::vector<ObjectLocatorNode::Positions3D> ObjectLocatorNode::retrievePosition(
             depth = depth_arr[0];
         else
             depth = NAN;
-        
+        */
+        depth = depth_mat.at<uint16_t>((int)y_center, (int)x_center);
+        std::cout << "[DEBUG] X : " << x_center << " Y: " << y_center << std::endl;
+        std::cout << "[DEBUG] Depth: " << depth << std::endl;
         ObjectLocatorNode::Positions3D pos_3D;
         if (std::isfinite(depth))
         {
-            pos_3D.x = depth * ((center_x - cam_info_cx) / cam_info_fx);
-            pos_3D.y = depth* ((center_y - cam_info_cy) / cam_info_fy);
+            pos_3D.x = depth * ((x_center - cam_info_cx) / cam_info_fx);
+            pos_3D.y = depth * ((y_center - cam_info_cy) / cam_info_fy);
             pos_3D.z = depth;
 
             positions3D_array.push_back(pos_3D);

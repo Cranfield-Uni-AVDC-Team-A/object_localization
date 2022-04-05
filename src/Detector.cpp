@@ -9,7 +9,7 @@ Detector::Detector(std::string engine_name, int input_w, int input_h, int num_cl
 {
     // Runtime
     runtime_ = createInferRuntime(gLogger);
-    assert(runtime != nullptr);
+    assert(runtime_ != nullptr);
 
     // Engine
     // deserialize the .engine and run inference
@@ -32,9 +32,9 @@ Detector::Detector(std::string engine_name, int input_w, int input_h, int num_cl
 
     // Context
     context_ = engine_->createExecutionContext();
-    assert(context != nullptr);
+    assert(context_ != nullptr);
     delete[] trtModelStream;
-    assert(engine->getNbBindings() == 2);
+    assert(engine_->getNbBindings() == 2);
 
     // Buffers
     // In order to bind the buffers, we need to know the names of the input and output tensors.

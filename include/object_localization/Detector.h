@@ -6,7 +6,6 @@
 #include "object_localization/logging.h"
 #include "object_localization/common.hpp"
 #include "object_localization/utils.h"
-#include "object_localization/calibrator.h"
 
 #include <opencv2/opencv.hpp>
 #include <cv_bridge/cv_bridge.h>
